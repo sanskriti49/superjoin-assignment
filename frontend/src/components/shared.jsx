@@ -4,7 +4,7 @@ export const VERDICT_LABELS = {
   CORROBORATED: 'Corroborated',
   CONTRADICTED: 'Contradicted',
   CONTEXTUALLY_DIFFERENT: 'Explained by context',
-  RELATED_BUT_NOT_COMPARABLE: 'Not comparable',
+  RELATED_BUT_NOT_COMPARABLE: 'Incompatible units / Unanchored',
 };
 
 export function Verdict({ kind }) {
@@ -15,8 +15,22 @@ export function Verdict({ kind }) {
   );
 }
 
+export function useAnimatedDots(interval = 400, maxDots = 3) {
+  const [dots, setDots] = React.useState(0);
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setDots((prev) => (prev + 1) % (maxDots + 1));
+    }, interval);
+    return () => clearInterval(timer);
+  }, [interval, maxDots]);
+
+  return '.'.repeat(dots);
+}
+
 export function Loading({ what = 'data' }) {
-  return <p className="loading">Loading {what}.</p>;
+  const dotString = useAnimatedDots();
+  return <p className="loading">Loading {what}{dotString}</p>;
 }
 
 export function Empty({ children }) {

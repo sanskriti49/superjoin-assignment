@@ -11,6 +11,20 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
     getDocument(documentId).then(setDetail).catch(() => setDetail(null));
   }, [documentId]);
 
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        if (page) {
+          setPage(null);
+        } else if (onBack) {
+          onBack();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [page, onBack]);
+
   const remove = async () => {
     if (!window.confirm('Remove this document and everything read from it?')) return;
     try {

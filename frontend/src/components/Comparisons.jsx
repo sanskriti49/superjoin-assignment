@@ -7,7 +7,7 @@ const KINDS = [
   ['CORROBORATED', 'Corroborated'],
   ['CONTRADICTED', 'Contradicted'],
   ['CONTEXTUALLY_DIFFERENT', 'Explained by context'],
-  ['RELATED_BUT_NOT_COMPARABLE', 'Not comparable'],
+  ['RELATED_BUT_NOT_COMPARABLE', 'Incompatible units / Unanchored'],
 ];
 
 export default function Comparisons({ onNotify, onChanged }) {
@@ -68,6 +68,12 @@ export default function Comparisons({ onNotify, onChanged }) {
         ))}
       </div>
 
+      {kind === 'RELATED_BUT_NOT_COMPARABLE' && (
+        <p className="note" style={{ marginBottom: 16 }}>
+          <strong>About this category:</strong> These pairs discuss the same entity and metric, but cannot be mathematically compared because their units require an external conversion (e.g. currency without exchange rates) or their time periods are unanchored/inferred. Independent documents with completely different topics (e.g. Keystroke Biometrics vs Logistics) do not appear here because they share no metrics.
+        </p>
+      )}
+
       {!data ? (
         <Loading what="comparisons" />
       ) : !data.items.length ? (
@@ -110,6 +116,17 @@ export default function Comparisons({ onNotify, onChanged }) {
 
 function ComparisonDialog({ relationship, onClose }) {
   const factors = relationship.reconciliation_factors || {};
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   return (
     <div className="overlay" onClick={onClose}>
       <div className="dialog" onClick={(event) => event.stopPropagation()}>

@@ -164,6 +164,16 @@ function FactDialog({ factId, onClose }) {
     getFact(factId).then(setFact).catch(() => setFact(null));
   }, [factId]);
 
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   return (
     <div className="overlay" onClick={onClose}>
       <div className="dialog" onClick={(event) => event.stopPropagation()}>

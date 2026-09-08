@@ -5,7 +5,7 @@ import Comparisons from './components/Comparisons';
 import DocumentDetail from './components/DocumentDetail';
 import Facts from './components/Facts';
 import Overview from './components/Overview';
-import { formatNumber } from './components/shared';
+import { formatNumber, useAnimatedDots } from './components/shared';
 
 const TABS = [
   ['overview', 'Overview'],
@@ -131,6 +131,7 @@ export default function App() {
 function UploadControl({ onUpload, busy }) {
   const input = useRef(null);
   const [dragging, setDragging] = useState(false);
+  const dots = useAnimatedDots();
 
   return (
     <div>
@@ -145,7 +146,7 @@ function UploadControl({ onUpload, busy }) {
         }}
       >
         {busy ? (
-          <span>Reading the document.</span>
+          <span>Reading the document{dots}</span>
         ) : (
           <>
             <span>Drop a PDF here</span>
