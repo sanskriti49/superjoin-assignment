@@ -46,10 +46,11 @@ class LLMProvider:
     @classmethod
     def build_prompt(cls, text: str, page_number: int, doc_name: str) -> str:
         return (
-            "Extract measured facts from the page text below. Return JSON with a key "
-            '"facts" holding a list. Each fact needs: subject, predicate (the metric '
-            "name as the text words it), value_raw (exactly as printed), unit, "
-            "time_period, scope, qualifier, evidence_quote, confidence.\n\n"
+            "Extract measured numerical facts and key semantic facts (such as architecture, "
+            "components, roles, statuses, definitions, methodologies, institutions, and relationships) "
+            'from the page text below. Return JSON with a key "facts" holding a list. Each fact needs: '
+            "subject, predicate (attribute or metric name), value_raw (exactly as stated/printed), "
+            "unit (if applicable, else null), time_period, scope, qualifier, evidence_quote, confidence.\n\n"
             "evidence_quote must be copied character for character from the text. A "
             "fact whose quote is not present verbatim will be discarded.\n\n"
             f"Document: {doc_name}\nPage: {page_number}\n\nText:\n\"\"\"\n{text}\n\"\"\"\n"

@@ -58,7 +58,7 @@ QUANTITY_RE = re.compile(
     \s*
     (?P<pct>per\s*cent|percent|%|bps|basis\s+points)?
     \s*
-    (?P<unit>{_UNIT_ALT})?
+    (?:(?P<unit>{_UNIT_ALT})\b)?
     (?P<close>\s*\))?
     """,
     re.IGNORECASE | re.VERBOSE,
@@ -186,6 +186,7 @@ MEASURE_ONLY = set(MULTIPLIERS) | set(COUNT_UNIT_HINTS) | {
 # Reason codes recorded when a candidate quantity does not become a fact.
 REJECT_BARE_NUMBER = "bare_number_without_unit"
 REJECT_LOOKS_LIKE_YEAR = "number_is_a_year_not_a_measure"
+REJECT_SECTION_NUMBER = "section_number_not_a_measure"
 REJECT_NO_LABEL = "no_metric_label_in_context"
 REJECT_LABEL_STOPWORDS = "label_is_only_function_words"
 REJECT_UNPARSEABLE = "value_could_not_be_normalized"
@@ -197,7 +198,7 @@ REJECT_LABEL_IS_UNIT = "label_names_a_unit_not_a_metric"
 # Rejections that are expected on every page (page numbers, list markers, dates
 # in running text). They are counted but not stored one by one, because a
 # hundred thousand of them would bury the diagnostics that matter.
-ROUTINE_FILTERS = {REJECT_BARE_NUMBER, REJECT_LOOKS_LIKE_YEAR}
+ROUTINE_FILTERS = {REJECT_BARE_NUMBER, REJECT_LOOKS_LIKE_YEAR, REJECT_SECTION_NUMBER}
 
 MAX_LABEL_TOKENS = 8
 MIN_CONFIDENCE = 0.30
@@ -235,7 +236,7 @@ class DocumentProfile:
 
         def weight(name: str, count: int) -> float:
             words = name.split()
-            score = count * (1.0 + 0.6 * (len(words) - 1))
+            score = count * (1.0 + 1.2 * (len(words) - 1))
             if title_tokens and any(word.lower() in title_tokens for word in words):
                 # A document's title names what the document is about, which
                 # outranks how often an incidental term happens to appear.
@@ -254,7 +255,7 @@ class DocumentProfile:
         elif fallback_title:
             words = [word for word in fallback_title.split()
                      if word.lower() not in DocumentProfiler.NON_ENTITY]
-            self.default_subject = " ".join(words) or fallback_title
+            self.default_subject = " ".join(words).title() or fallback_title
 
         if self.period_counts:
             self.default_period_raw = self.period_counts.most_common(1)[0][0]
@@ -269,7 +270,7 @@ class DocumentProfiler:
     NON_ENTITY = {
         "the", "this", "that", "these", "those", "it", "in", "on", "at", "for",
         "and", "or", "but", "however", "although", "while", "during", "as",
-        "table", "figure", "chart", "annex", "annexure", "appendix", "chapter",
+        "table", "figure", "fig", "figs", "chart", "annex", "annexure", "appendix", "chapter",
         "section", "note", "notes", "page", "source", "sources", "total",
         "january", "february", "march", "april", "may", "june", "july",
         "august", "september", "october", "november", "december",
@@ -282,11 +283,28 @@ class DocumentProfiler:
         "overview", "summary", "memorandum", "circular", "bulletin", "brief",
         "briefing", "paper", "study", "analysis", "outlook", "edition",
         "volume", "disclosure", "disclosures", "highlights", "appendix",
+        # Technical models, algorithms and frameworks that are components, not entities
+        "cnn", "rnn", "gru", "lstm", "svm", "mlp", "knn", "ann", "rf", "dt", "nb", "gmm", "hmm",
+        "ast", "api", "url", "cpu", "gpu", "tpu", "ram", "os", "pc", "gui",
+        # Evaluation metrics
+        "eer", "far", "frr", "acc", "auc", "roc", "f1", "fnmr", "fmr", "ania", "anga",
+        # Academic & publication terminology
+        "ieee", "acm", "elsevier", "sciencedirect", "springer", "proceedings", "conference",
+        "symposium", "workshop", "journal", "international", "transactions",
+        "author", "authors", "university", "department", "school", "college", "institute",
+        "et", "al", "beijing", "china", "hong", "kong",
     }
 
     @classmethod
     def profile_pages(cls, pages: Iterable[Dict[str, Any]], title: str = "") -> DocumentProfile:
         profile = DocumentProfile()
+        if title:
+            title_words = [w for w in title.split() if w.lower() not in cls.NON_ENTITY and len(w) > 2]
+            if len(title_words) >= 2:
+                title_cand = " ".join(title_words[:2]).title()
+                profile.subject_counts[title_cand] += 15
+            elif len(title_words) == 1:
+                profile.subject_counts[title_words[0].title()] += 10
         for page in pages:
             cls.observe(profile, page.get("text", ""))
         return profile.finalize(fallback_title=title)
@@ -340,6 +358,10 @@ class DocumentProfiler:
         tokens = cleaned.split()
         if not tokens:
             return None
+        if any(len(token) <= 1 for token in tokens):
+            return None
+        if any(token.lower() in {"et", "al", "fig", "figs"} for token in tokens):
+            return None
         if all(token.lower() in cls.NON_ENTITY for token in tokens):
             return None
         if any(cls.ABBREVIATION_SHAPE.match(token) for token in tokens):
@@ -364,6 +386,8 @@ class Candidate:
     match: re.Match
     prev_line: Optional[str]
     next_line: Optional[str]
+    line_index: int = 0
+    all_lines: Optional[List[Tuple[str, int]]] = None
 
 
 class FactExtractionPipeline:
@@ -399,12 +423,15 @@ class FactExtractionPipeline:
             next_line = lines[index + 1][0] if index + 1 < len(lines) else None
 
             for match in QUANTITY_RE.finditer(line):
-                candidate = Candidate(line, line_start, match, prev_line, next_line)
+                candidate = Candidate(line, line_start, match, prev_line, next_line, index, lines)
                 fact, issue = cls._evaluate(candidate, doc_id, page_number, page_text, profile)
                 if fact:
                     facts.append(fact)
                 elif issue:
                     issues.append(issue)
+
+        semantic_facts = cls._extract_semantic_facts(doc_id, page_number, page_text, lines, profile)
+        facts.extend(semantic_facts)
 
         facts, dropped = cls._dedupe(facts)
         issues.extend(dropped)
@@ -447,6 +474,28 @@ class FactExtractionPipeline:
             }
 
         has_measure = bool(groups["cur"] or groups["mag"] or groups["pct"] or groups["unit"])
+        trailing_unit = None
+        next_unit_len = 0
+        if not has_measure:
+            window = candidate.line[match.end(): min(len(candidate.line), match.end() + 60)]
+            m_unit = re.match(rf"^\s*(?:[A-Za-z0-9&/–-]+\s+){{0,3}}(?P<u_word>{_UNIT_ALT})\b", window, re.IGNORECASE)
+            if m_unit:
+                trailing_unit = m_unit.group("u_word").lower()
+                has_measure = True
+            else:
+                m_range = re.match(rf"^\s*(?:to|[-–])\s*\d+(?:\.\d+)?\s*(?:[A-Za-z0-9&/–-]+\s+){{0,2}}(?P<u_word>{_UNIT_ALT}|per\s*cent|percent|%)\b", window, re.IGNORECASE)
+                if m_range:
+                    u_word = m_range.group("u_word").lower()
+                    trailing_unit = "%" if u_word in {"percent", "per cent", "%"} else u_word
+                    has_measure = True
+                elif candidate.next_line and len(candidate.line[match.end():].strip()) <= 1:
+                    m_next = re.match(rf"^\s*(?:[A-Za-z0-9&/–-]+\s+){{0,2}}(?P<u_word>{_UNIT_ALT}|per\s*cent|percent|%)\b", candidate.next_line[:60], re.IGNORECASE)
+                    if m_next:
+                        u_word = m_next.group("u_word").lower()
+                        trailing_unit = "%" if u_word in {"percent", "per cent", "%"} else u_word
+                        has_measure = True
+                        next_unit_len = m_next.end()
+
         if not has_measure:
             return reject(REJECT_BARE_NUMBER)
 
@@ -454,10 +503,23 @@ class FactExtractionPipeline:
         # A four digit number with no decimals that reads as a year is a date
         # reference, not a measurement, unless a currency makes it a value.
         if (not groups["cur"] and not groups["pct"] and "." not in number_text
-                and len(number_text) == 4 and 1900 <= int(number_text) <= 2100):
+                and len(number_text) == 4 and 1900 <= int(number_text) <= 2100 and not trailing_unit):
             return reject(REJECT_LOOKS_LIKE_YEAR)
 
-        label, strategy, label_span = cls._find_label(candidate)
+        # Decimal numbers like "6.2 Agents and Architecture" or "2.1 Gap Identified"
+        # at the start of a clause/line or table of contents followed by a Capitalized title
+        # word are outline navigation, not discrete counted quantities.
+        unit_word = trailing_unit or groups.get("unit")
+        if not groups["cur"] and not groups["pct"] and "." in number_text and unit_word:
+            sub = candidate.line[max(0, match.start() - 6): min(len(candidate.line), match.end() + 25)]
+            if re.search(r"(?:^|[;:\n•|]|\s{2,}|\b\d+\s+)\s*(?:[IVXLCDM]+|\d{1,2})\.\d{1,3}\s+[A-Z]", sub):
+                return reject(REJECT_SECTION_NUMBER)
+
+        label, strategy, label_span = cls._find_label(candidate, prefer_prev=bool(next_unit_len > 0))
+        if not label and trailing_unit:
+            label = trailing_unit
+            strategy = "trailing"
+            label_span = (match.start(), min(len(candidate.line), match.end() + 80))
         if not label:
             return reject(REJECT_NO_LABEL)
 
@@ -474,8 +536,14 @@ class FactExtractionPipeline:
             return reject(REJECT_UNPARSEABLE)
         if unit is None and groups["unit"]:
             unit = groups["unit"].lower()
+        if unit is None and trailing_unit:
+            unit = trailing_unit
+            if unit == "%":
+                normalized = mantissa
 
-        quote, quote_start, quote_end = cls._build_evidence(candidate, label_span, page_text)
+        quote, quote_start, quote_end = cls._build_evidence(
+            candidate, label_span, page_text, strategy=strategy, next_unit_len=next_unit_len
+        )
         if quote != page_text[quote_start:quote_end]:
             return reject(REJECT_GROUNDING)
 
@@ -538,20 +606,60 @@ class FactExtractionPipeline:
     # Label discovery
     # ------------------------------------------------------------------
     @classmethod
-    def _find_label(cls, candidate: Candidate) -> Tuple[Optional[str], str, Tuple[int, int]]:
+    def _find_table_columns(cls, lines: List[Tuple[str, int]], line_idx: int, expected_count: int) -> Optional[List[str]]:
+        for b in range(1, 6):
+            if line_idx - b < 0:
+                break
+            prev = lines[line_idx - b][0].strip()
+            if not prev:
+                continue
+            cols = [w.strip(" ,;|:") for w in re.findall(r"[A-Za-z0-9_+-]+(?:\([A-Za-z0-9%_+-]+\))?", prev) if w.strip(" ,|:")]
+            if len(cols) == expected_count and all(not c.isdigit() for c in cols):
+                return cols
+            if len(cols) >= expected_count and all(not c.isdigit() for c in cols[:expected_count]):
+                return cols[:expected_count]
+            if any(w.endswith((".", "!", "?")) for w in prev.split()) and len(prev.split()) > 8:
+                break
+        return None
+
+    @classmethod
+    def _find_label(cls, candidate: Candidate, prefer_prev: bool = False) -> Tuple[Optional[str], str, Tuple[int, int]]:
         """Locate the metric phrase for a quantity.
 
-        Four generic layouts are tried, in decreasing order of reliability:
+        Five generic layouts are tried, in decreasing order of reliability:
 
-        1. ``prose``      "forex reserves stood at US$ 668.3 billion"
-        2. ``trailing``   "740 Mn express parcel shipments"
-        3. ``next_line``  a KPI tile whose caption sits under the number
-        4. ``prev_line``  a table row whose header sits above the number
+        1. ``table_cell`` a 2D data grid where column and row headers combine
+        2. ``prose``      "forex reserves stood at US$ 668.3 billion"
+        3. ``trailing``   "740 Mn express parcel shipments"
+        4. ``next_line``  a KPI tile whose caption sits under the number
+        5. ``prev_line``  a table row whose header sits above the number
         """
         match = candidate.match
         line = candidate.line
         prefix = line[: match.start()]
         suffix = line[match.end():]
+
+        # 1. 2D Table Row Check: If line contains multiple quantities in a grid
+        all_quantities = list(QUANTITY_RE.finditer(line))
+        if len(all_quantities) >= 2 and candidate.all_lines and candidate.line_index is not None:
+            first_q = all_quantities[0]
+            row_header = line[:first_q.start()].strip()
+            row_header = SECTION_MARKER_RE.sub("", row_header).strip(" -–—:;,•")
+            cols = cls._find_table_columns(candidate.all_lines, candidate.line_index, len(all_quantities))
+            if cols and len(cols) == len(all_quantities):
+                try:
+                    col_idx = [q.start() for q in all_quantities].index(match.start())
+                    col_name = cols[col_idx]
+                    combined = f"{col_name} {row_header}".strip() if row_header else col_name
+                    clean_c = cls._clean_label(combined)
+                    if clean_c:
+                        return clean_c, "table_cell", (match.start(), min(len(line), match.end() + 60))
+                except (ValueError, IndexError):
+                    pass
+            elif row_header and len(row_header) >= 2 and not row_header.isdigit():
+                clean_r = cls._clean_label(row_header)
+                if clean_r:
+                    return clean_r, "table_row", (0, min(len(line), match.end() + 60))
 
         label = cls._clean_label(cls._label_from_prefix(prefix))
         if label:
@@ -561,12 +669,17 @@ class FactExtractionPipeline:
         if label:
             return label, "trailing", (match.start(), min(len(line), match.end() + 160))
 
+        if prefer_prev and candidate.prev_line:
+            label = cls._clean_label(cls._label_from_neighbour(candidate.prev_line))
+            if label:
+                return label, "prev_line", (match.start(), match.end())
+
         if candidate.next_line:
             label = cls._clean_label(cls._label_from_neighbour(candidate.next_line))
             if label:
                 return label, "next_line", (match.start(), match.end())
 
-        if candidate.prev_line:
+        if not prefer_prev and candidate.prev_line:
             label = cls._clean_label(cls._label_from_neighbour(candidate.prev_line))
             if label:
                 return label, "prev_line", (match.start(), match.end())
@@ -664,19 +777,31 @@ class FactExtractionPipeline:
         if len(content) == 1 and len(content[0]) < 3:
             return None
 
-        # Cap on meaningful words, not raw tokens, so "growth in gross value
-        # added in the agriculture and allied sector" survives intact while a
-        # runaway phrase still gets cut.
+        # Cap on meaningful words: take the ones closest to the reporting verb or number (from the end)
         kept: List[str] = []
-        seen_content = 0
-        for token in tokens:
+        for token in reversed(tokens):
             if token.lower() not in STOPWORDS and len(token) > 1:
-                if seen_content == MAX_LABEL_TOKENS:
+                kept.append(token)
+                if len(kept) == MAX_LABEL_TOKENS:
                     break
-                seen_content += 1
-            kept.append(token)
+        kept.reverse()
+
+        while kept and kept[0].lower() in STOPWORDS:
+            kept.pop(0)
         while kept and kept[-1].lower() in STOPWORDS:
             kept.pop()
+
+        if not kept:
+            return None
+
+        NON_METRIC_LABELS = {
+            "table", "figure", "fig", "chart", "work", "fact", "lengths", "author", "authors",
+            "section", "page", "step", "steps", "id", "formula", "change", "sequence",
+            "intruders", "missing", "data", "noise", "see", "show", "shows", "shown", "item"
+        }
+        if all(token.lower() in NON_METRIC_LABELS or token.isdigit() for token in kept):
+            return None
+
         return " ".join(kept)
 
     # ------------------------------------------------------------------
@@ -759,7 +884,8 @@ class FactExtractionPipeline:
     # ------------------------------------------------------------------
     @classmethod
     def _build_evidence(
-        cls, candidate: Candidate, label_span: Tuple[int, int], page_text: str
+        cls, candidate: Candidate, label_span: Tuple[int, int], page_text: str,
+        strategy: str = "", next_unit_len: int = 0
     ) -> Tuple[str, int, int]:
         """Return the evidence quote and its exact span in the page text.
 
@@ -778,6 +904,17 @@ class FactExtractionPipeline:
 
         abs_start = candidate.line_start + start
         abs_end = candidate.line_start + end
+
+        # If the metric label was read from the preceding line, include it in the quote
+        if strategy == "prev_line" and candidate.all_lines and candidate.line_index > 0:
+            prev_line_start = candidate.all_lines[candidate.line_index - 1][1]
+            abs_start = min(abs_start, prev_line_start)
+
+        # If the unit was read from the following line, include it in the quote
+        if next_unit_len > 0 and candidate.all_lines and candidate.line_index + 1 < len(candidate.all_lines):
+            next_line_start = candidate.all_lines[candidate.line_index + 1][1]
+            abs_end = max(abs_end, next_line_start + next_unit_len)
+
         return page_text[abs_start:abs_end], abs_start, abs_end
 
     # ------------------------------------------------------------------
@@ -814,7 +951,8 @@ class FactExtractionPipeline:
         dropped: List[Dict[str, Any]] = []
 
         for fact in facts:
-            key = (fact["predicate"], fact["value_numeric"], fact["time_period_normalized"],
+            val = fact.get("value_numeric") if fact.get("value_numeric") is not None else fact.get("value_text")
+            key = (fact["predicate"], val, fact["time_period_normalized"],
                    fact["subject_normalized"])
             incumbent = best.get(key)
             if incumbent is None:
@@ -854,6 +992,9 @@ class FactExtractionPipeline:
             ),
             REJECT_LOOKS_LIKE_YEAR: (
                 f"'{candidate_text}' parses as a calendar year rather than a measured value."
+            ),
+            REJECT_SECTION_NUMBER: (
+                f"'{candidate_text}' appears to be a section or outline number rather than a measured quantity."
             ),
             REJECT_NO_LABEL: (
                 f"A quantity '{candidate_text}' was found but no metric phrase could be read "
@@ -926,7 +1067,13 @@ class FactExtractionPipeline:
             value_raw = str(item.get("value_raw", "")).strip()
             mantissa, unit, normalized = FactNormalizer.parse_numeric_value(value_raw)
             if mantissa is None:
-                continue
+                value_text = FactNormalizer.normalize_semantic_value(value_raw)
+                if not value_text:
+                    continue
+                normalized = None
+                unit = item.get("unit")
+            else:
+                value_text = str(mantissa)
 
             predicate_label, predicate_key = FactNormalizer.normalize_predicate(
                 str(item.get("predicate", "")), acronyms=profile.acronyms
@@ -940,7 +1087,7 @@ class FactExtractionPipeline:
             period_raw = item.get("time_period") or None
             period_key = FactNormalizer.normalize_time_period(period_raw)
 
-            fingerprint = f"{doc_id}|{page_number}|{predicate_key}|{normalized}|llm"
+            fingerprint = f"{doc_id}|{page_number}|{predicate_key}|{normalized or value_text}|llm"
             facts.append({
                 "id": f"fact_{hashlib.sha1(fingerprint.encode()).hexdigest()[:16]}",
                 "document_id": doc_id,
@@ -950,7 +1097,7 @@ class FactExtractionPipeline:
                 "predicate_label": predicate_label,
                 "value_raw": value_raw,
                 "value_numeric": normalized,
-                "value_text": str(mantissa),
+                "value_text": value_text,
                 "unit": unit or item.get("unit"),
                 "unit_family": FactNormalizer.unit_family(unit or item.get("unit")),
                 "time_period": period_raw,
@@ -967,3 +1114,283 @@ class FactExtractionPipeline:
             })
 
         return facts, issues
+
+    @classmethod
+    def _extract_semantic_facts(
+        cls,
+        doc_id: str,
+        page_number: int,
+        page_text: str,
+        lines: List[Tuple[str, int]],
+        profile: DocumentProfile,
+    ) -> List[Dict[str, Any]]:
+        semantic_facts: List[Dict[str, Any]] = []
+        seen_keys: set = set()
+
+        kv_re = re.compile(
+            r"^\s*(?P<key>[A-Za-z][A-Za-z0-9\s/_\-]{1,35})\s*(?::|\s+[-–—]\s+|\s{2,}|\t)\s*(?P<val>[A-Za-z0-9][A-Za-z0-9\s/_,.\(\)\-–+]{2,120})$"
+        )
+        relation_re = re.compile(
+            r"\b(?P<subj>[A-Z][A-Za-z0-9\s&]{2,35})\s+(?:uses|utilizes|implements|incorporates|consists of|comprises|requires|includes|supports)\s+(?P<val>[A-Za-z0-9][A-Za-z0-9\s/_,&-+]{3,80})"
+        )
+        def_re = re.compile(
+            r"\b(?P<subj>[A-Z][A-Za-z0-9\s-]{2,35})\s+(?:is defined as|refers to|denotes)\s+(?P<val>[A-Za-z0-9][A-Za-z0-9\s/_,.\(\)\-–+]{5,100})",
+            re.IGNORECASE,
+        )
+        degree_re = re.compile(
+            r"degree\s+of\s+(?P<deg>(?:Bachelor|Master|Doctor(?:ate)?|B\.?Sc|M\.?Sc|B\.?Tech|M\.?Tech|B\.?E|M\.?E|Ph\.?D|Associate|Diploma)[A-Za-z\s\.]+?)(?:\s+in\s+(?P<dept>[A-Za-z\s\(\)]+))?(?:\s+at|\s+from|\.|$)",
+            re.IGNORECASE,
+        )
+        role_status_re = re.compile(
+            r"\b(?P<person>[A-Z][a-z]+\s+[A-Z][a-z]+)\s+(?:was appointed as|served as|resigned as|acts as)\s+(?:an?|the)?\s*(?P<role>[A-Za-z\s]{3,50})",
+            re.IGNORECASE,
+        )
+
+        skip_keys = {
+            "note", "notes", "source", "sources", "table", "figure", "fig", "page",
+            "section", "chapter", "tel", "fax", "email", "url", "http", "https", "www"
+        }
+        skip_clause_openers = {
+            "this", "that", "these", "those", "it", "there", "what", "which", "he",
+            "she", "they", "we", "you", "who", "whom", "when", "because", "to",
+            "since", "while", "as", "if", "although", "though", "table", "figure",
+            "fig", "section", "in", "for", "with", "after", "before", "during"
+        }
+
+        for line, line_start in lines:
+            line_str = line.strip()
+            if len(line_str) < 10:
+                continue
+
+            # 1. Key-Value / Labeled structures
+            m_kv = kv_re.match(line_str)
+            if m_kv:
+                raw_k, raw_v = m_kv.group("key").strip(), m_kv.group("val").strip()
+                k_low = raw_k.lower()
+                if (k_low not in skip_keys and not any(k_low.startswith(sk + " ") for sk in skip_keys)
+                        and len(raw_k.split()) <= 4):
+                    pred_label, pred_key = FactNormalizer.normalize_predicate(raw_k, acronyms=profile.acronyms)
+                    if pred_key and pred_key not in STOPWORDS and len(pred_key) > 2:
+                        subj_disp, subj_key = FactNormalizer.normalize_entity(profile.default_subject)
+                        quote = line_str
+                        q_start = line_start + line.find(line_str)
+                        q_end = q_start + len(quote)
+                        if page_text[q_start:q_end] == quote:
+                            fingerprint = f"{doc_id}|{page_number}|{pred_key}|{raw_v[:40]}"
+                            fact_id = f"fact_{hashlib.sha1(fingerprint.encode()).hexdigest()[:16]}"
+                            if fact_id not in seen_keys:
+                                seen_keys.add(fact_id)
+                                semantic_facts.append({
+                                    "id": fact_id,
+                                    "document_id": doc_id,
+                                    "subject": subj_disp,
+                                    "subject_normalized": subj_key,
+                                    "predicate": pred_key,
+                                    "predicate_label": pred_label.title() if pred_label.islower() else pred_label,
+                                    "value_raw": raw_v,
+                                    "value_numeric": None,
+                                    "value_text": FactNormalizer.normalize_semantic_value(raw_v),
+                                    "unit": None,
+                                    "unit_family": "semantic",
+                                    "time_period": profile.default_period_raw,
+                                    "time_period_normalized": FactNormalizer.normalize_time_period(profile.default_period_raw),
+                                    "scope": None,
+                                    "qualifier": None,
+                                    "confidence": 0.80,
+                                    "evidence_quote": quote,
+                                    "evidence_page": page_number,
+                                    "char_start": q_start,
+                                    "char_end": q_end,
+                                    "extraction_method": "semantic:key_value",
+                                    "extraction_metadata": {
+                                        "pattern": "key_value",
+                                        "raw_key": raw_k,
+                                        "period_inferred_from_document": True,
+                                        "subject_inferred_from_document": True,
+                                    },
+                                })
+
+            # 2. Degree and Department
+            m_deg = degree_re.search(line_str)
+            if m_deg:
+                raw_deg = m_deg.group("deg").strip()
+                if len(raw_deg) > 3 and raw_deg.lower() not in STOPWORDS:
+                    pred_label, pred_key = FactNormalizer.normalize_predicate("degree")
+                    subj_disp, subj_key = FactNormalizer.normalize_entity(profile.default_subject)
+                    quote = line_str
+                    q_start = line_start + line.find(line_str)
+                    q_end = q_start + len(quote)
+                    if page_text[q_start:q_end] == quote:
+                        fingerprint = f"{doc_id}|{page_number}|{pred_key}|{raw_deg}"
+                        fact_id = f"fact_{hashlib.sha1(fingerprint.encode()).hexdigest()[:16]}"
+                        if fact_id not in seen_keys:
+                            seen_keys.add(fact_id)
+                            semantic_facts.append({
+                                "id": fact_id,
+                                "document_id": doc_id,
+                                "subject": subj_disp,
+                                "subject_normalized": subj_key,
+                                "predicate": pred_key,
+                                "predicate_label": "Degree",
+                                "value_raw": raw_deg,
+                                "value_numeric": None,
+                                "value_text": FactNormalizer.normalize_semantic_value(raw_deg),
+                                "unit": None,
+                                "unit_family": "semantic",
+                                "time_period": profile.default_period_raw,
+                                "time_period_normalized": FactNormalizer.normalize_time_period(profile.default_period_raw),
+                                "scope": None,
+                                "qualifier": None,
+                                "confidence": 0.85,
+                                "evidence_quote": quote,
+                                "evidence_page": page_number,
+                                "char_start": q_start,
+                                "char_end": q_end,
+                                "extraction_method": "semantic:degree",
+                                "extraction_metadata": {
+                                    "pattern": "degree",
+                                    "period_inferred_from_document": True,
+                                    "subject_inferred_from_document": True,
+                                },
+                            })
+
+            # 3. Governance / Role / Status assertions
+            m_role = role_status_re.search(line_str)
+            if m_role:
+                person = m_role.group("person").strip()
+                role_val = m_role.group("role").strip()
+                subj_disp, subj_key = FactNormalizer.normalize_entity(person)
+                pred_label, pred_key = FactNormalizer.normalize_predicate("role_status")
+                quote = line_str
+                q_start = line_start + line.find(line_str)
+                q_end = q_start + len(quote)
+                if page_text[q_start:q_end] == quote:
+                    fingerprint = f"{doc_id}|{page_number}|{subj_key}|{pred_key}|{role_val[:30]}"
+                    fact_id = f"fact_{hashlib.sha1(fingerprint.encode()).hexdigest()[:16]}"
+                    if fact_id not in seen_keys:
+                        seen_keys.add(fact_id)
+                        semantic_facts.append({
+                            "id": fact_id,
+                            "document_id": doc_id,
+                            "subject": subj_disp,
+                            "subject_normalized": subj_key,
+                            "predicate": pred_key,
+                            "predicate_label": "Role Status",
+                            "value_raw": role_val,
+                            "value_numeric": None,
+                            "value_text": FactNormalizer.normalize_semantic_value(role_val),
+                            "unit": None,
+                            "unit_family": "semantic",
+                            "time_period": profile.default_period_raw,
+                            "time_period_normalized": FactNormalizer.normalize_time_period(profile.default_period_raw),
+                            "scope": None,
+                            "qualifier": None,
+                            "confidence": 0.82,
+                            "evidence_quote": quote,
+                            "evidence_page": page_number,
+                            "char_start": q_start,
+                            "char_end": q_end,
+                            "extraction_method": "semantic:role_status",
+                            "extraction_metadata": {
+                                "pattern": "role_status",
+                                "period_inferred_from_document": True,
+                                "subject_inferred_from_document": False,
+                            },
+                        })
+
+            # 4. Architecture / Technology / Component relation
+            m_rel = relation_re.search(line_str)
+            if m_rel:
+                raw_s, raw_v = m_rel.group("subj").strip(), m_rel.group("val").strip()
+                s_words = raw_s.lower().split()
+                if (s_words and s_words[0] not in skip_clause_openers
+                        and not any(w in {"table", "figure", "fig", "section"} for w in s_words)
+                        and len(s_words) <= 4
+                        and not any(bad in raw_s.lower() for bad in ["data", "intruder", "result", "sample"])):
+                    subj_disp, subj_key = FactNormalizer.normalize_entity(raw_s)
+                    pred_label, pred_key = FactNormalizer.normalize_predicate("architecture_components")
+                    quote = line_str
+                    q_start = line_start + line.find(line_str)
+                    q_end = q_start + len(quote)
+                    if page_text[q_start:q_end] == quote:
+                        fingerprint = f"{doc_id}|{page_number}|{subj_key}|{pred_key}|{raw_v[:30]}"
+                        fact_id = f"fact_{hashlib.sha1(fingerprint.encode()).hexdigest()[:16]}"
+                        if fact_id not in seen_keys:
+                            seen_keys.add(fact_id)
+                            semantic_facts.append({
+                                "id": fact_id,
+                                "document_id": doc_id,
+                                "subject": subj_disp,
+                                "subject_normalized": subj_key,
+                                "predicate": pred_key,
+                                "predicate_label": "Architecture Components",
+                                "value_raw": raw_v,
+                                "value_numeric": None,
+                                "value_text": FactNormalizer.normalize_semantic_value(raw_v),
+                                "unit": None,
+                                "unit_family": "semantic",
+                                "time_period": profile.default_period_raw,
+                                "time_period_normalized": FactNormalizer.normalize_time_period(profile.default_period_raw),
+                                "scope": None,
+                                "qualifier": None,
+                                "confidence": 0.76,
+                                "evidence_quote": quote,
+                                "evidence_page": page_number,
+                                "char_start": q_start,
+                                "char_end": q_end,
+                                "extraction_method": "semantic:relation",
+                                "extraction_metadata": {
+                                    "pattern": "relation",
+                                    "period_inferred_from_document": True,
+                                    "subject_inferred_from_document": False,
+                                },
+                            })
+
+            # 5. Definition / Concept mapping
+            m_def = def_re.search(line_str)
+            if m_def:
+                raw_term, raw_def = m_def.group("subj").strip(), m_def.group("val").strip()
+                t_words = raw_term.lower().split()
+                if (t_words and t_words[0] not in skip_clause_openers
+                        and not any(w in {"table", "figure", "fig", "section"} for w in t_words)
+                        and len(t_words) <= 4):
+                    subj_disp, subj_key = FactNormalizer.normalize_entity(raw_term)
+                    pred_label, pred_key = FactNormalizer.normalize_predicate("definition")
+                    quote = line_str
+                    q_start = line_start + line.find(line_str)
+                    q_end = q_start + len(quote)
+                    if page_text[q_start:q_end] == quote:
+                        fingerprint = f"{doc_id}|{page_number}|{subj_key}|{pred_key}|{raw_def[:30]}"
+                        fact_id = f"fact_{hashlib.sha1(fingerprint.encode()).hexdigest()[:16]}"
+                        if fact_id not in seen_keys:
+                            seen_keys.add(fact_id)
+                            semantic_facts.append({
+                                "id": fact_id,
+                                "document_id": doc_id,
+                                "subject": subj_disp,
+                                "subject_normalized": subj_key,
+                                "predicate": pred_key,
+                                "predicate_label": "Definition",
+                                "value_raw": raw_def,
+                                "value_numeric": None,
+                                "value_text": FactNormalizer.normalize_semantic_value(raw_def),
+                                "unit": None,
+                                "unit_family": "semantic",
+                                "time_period": profile.default_period_raw,
+                                "time_period_normalized": FactNormalizer.normalize_time_period(profile.default_period_raw),
+                                "scope": None,
+                                "qualifier": None,
+                                "confidence": 0.78,
+                                "evidence_quote": quote,
+                                "evidence_page": page_number,
+                                "char_start": q_start,
+                                "char_end": q_end,
+                                "extraction_method": "semantic:definition",
+                                "extraction_metadata": {
+                                    "pattern": "definition",
+                                    "period_inferred_from_document": True,
+                                    "subject_inferred_from_document": False,
+                                },
+                            })
+
+        return semantic_facts

@@ -113,8 +113,18 @@ async def upload_document(
 def list_documents(db: Session = Depends(get_db)) -> List[dict]:
     counts = dict(db.query(Fact.document_id, func.count(Fact.id))
                   .group_by(Fact.document_id).all())
+    from sqlalchemy import distinct
+    rel_rows = db.query(Fact.document_id, func.count(distinct(FactRelationship.id)))\
+                 .join(FactRelationship, (Fact.id == FactRelationship.fact_a_id) | (Fact.id == FactRelationship.fact_b_id))\
+                 .group_by(Fact.document_id).all()
+    rel_counts = dict(rel_rows)
     documents = db.query(Document).order_by(Document.created_at.desc()).all()
-    return [document.to_dict(fact_count=counts.get(document.id, 0)) for document in documents]
+    res = []
+    for document in documents:
+        d = document.to_dict(fact_count=counts.get(document.id, 0))
+        d["relationship_count"] = rel_counts.get(document.id, 0)
+        res.append(d)
+    return res
 
 
 @router.get("/{document_id}")

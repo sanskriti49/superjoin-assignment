@@ -11,6 +11,7 @@ import hashlib
 import logging
 import re
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -50,11 +51,29 @@ def canonicalize_page_text(raw: str) -> str:
     if not raw:
         return ""
 
-    text = strip_accents_and_controls(raw)
+    text = unicodedata.normalize("NFKD", raw)
+    text = (
+        text.replace("ﬁ", "fi")
+        .replace("ﬂ", "fl")
+        .replace("ﬀ", "ff")
+        .replace("ﬃ", "ffi")
+        .replace("ﬄ", "ffl")
+    )
+    text = strip_accents_and_controls(text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Collapse runs of 2+ spaces/tabs (common in layout mode or justified text)
+    text = re.sub(r"[ \t ]{2,}", " ", text)
     text = re.sub(r"[ \t ]+", " ", text)
 
     lines = [ln.strip() for ln in text.split("\n")]
+    non_empty = [ln for ln in lines if ln]
+
+    # Detect if page text has severe line fragmentation (e.g. single-word lines)
+    is_fragmented = False
+    if len(non_empty) > 10:
+        single_words = sum(1 for ln in non_empty if len(ln.split()) <= 1)
+        if single_words / len(non_empty) > 0.30:
+            is_fragmented = True
 
     # Column width varies wildly between a two-column report (about 45
     # characters) and a slide (about 25). Measuring it per page is what lets one
@@ -63,6 +82,31 @@ def canonicalize_page_text(raw: str) -> str:
     # continues it. A short line was broken on purpose and stands alone.
     wrap_width = _estimate_wrap_width(lines)
     continuation_floor = wrap_width * 0.72
+
+    continuation_words = {
+        "and", "or", "to", "in", "of", "for", "with", "at", "by", "from",
+        "as", "on", "into", "through", "that", "which", "than", "is", "are", "was", "were"
+    }
+
+    def is_table_data_row(ln: str) -> bool:
+        tokens = ln.split()
+        if len(tokens) < 3:
+            return False
+        num_tokens = sum(1 for t in tokens if re.match(r"^[-+]?\d+(?:\.\d+)?%?$", t))
+        return num_tokens >= 2 and (num_tokens / len(tokens) >= 0.40 or bool(re.search(r"\d+(?:\.\d+)?%?\s+\d+(?:\.\d+)?%?", ln)))
+
+    def is_table_header_line(ln: str) -> bool:
+        tokens = ln.split()
+        if len(tokens) < 2:
+            return False
+        if re.match(r"^(?:Table|Figure|Fig\.)\s+\d+", ln, re.IGNORECASE):
+            return True
+        metric_acronyms = {"FRR", "FAR", "EER", "ACC", "F1", "RMSE", "MAE", "LOSS", "PRECISION", "RECALL", "FNMR", "FMR", "ANIA", "ANGA"}
+        if any(t.upper() in metric_acronyms for t in tokens) and not any(t.lower() in {"the", "and", "that", "which", "was", "were", "is", "are"} for t in tokens):
+            return True
+        if sum(1 for t in tokens if re.match(r"^[A-Z][A-Za-z0-9_+-]*(?:\([0-9]+\))?$", t)) >= 3 and not any(t.endswith((".", "!", "?")) for t in tokens):
+            return True
+        return False
 
     out: List[str] = []
     buffer = ""
@@ -77,15 +121,44 @@ def canonicalize_page_text(raw: str) -> str:
 
     for line in lines:
         if not line:
-            flush()
+            if not is_fragmented or (buffer and SENTENCE_END.search(buffer)):
+                flush()
             continue
+
+        is_bullet = bool(BULLET_START.match(line))
+        is_figure_tile = bool(FIGURE_START.match(line) and len(line) < SHORT_LINE_CHARS)
+        is_prev_figure_tile = bool(FIGURE_START.match(buffer) and len(buffer) < SHORT_LINE_CHARS)
+        is_kv = bool(re.match(r"^\s*[A-Z][A-Za-z0-9\s/_\-]{1,30}:", line))
+        is_heading = bool(re.match(r"^\s*(?:[IVXLCDM]+\.|\d{1,2}(?:\.\d{1,3})+\s+[A-Z])", line))
+        is_t_row = is_table_data_row(line)
+        is_buf_t_row = is_table_data_row(buffer) if buffer else False
+        is_t_head = is_table_header_line(line)
+        is_buf_t_head = is_table_header_line(buffer) if buffer else False
+        ends_sentence = bool(SENTENCE_END.search(last_physical))
+
+        # Grammatical continuation signals
+        starts_lower = bool(line and line[0].islower())
+        last_tokens = last_physical.split()
+        ends_cont_word = bool(last_tokens and last_tokens[-1].lower() in continuation_words)
+        first_tokens = line.split()
+        starts_cont_word = bool(first_tokens and first_tokens[0].lower() in continuation_words)
+
+        length_ok = len(last_physical) >= continuation_floor
+        grammar_ok = starts_lower or ends_cont_word or starts_cont_word
 
         continues = (
             bool(buffer)
-            and not BULLET_START.match(line)
-            and not (FIGURE_START.match(line) and len(line) < SHORT_LINE_CHARS)
-            and len(last_physical) >= continuation_floor
-            and not SENTENCE_END.search(last_physical)
+            and not is_bullet
+            and not is_figure_tile
+            and not is_prev_figure_tile
+            and not is_kv
+            and not is_heading
+            and not is_t_row
+            and not is_buf_t_row
+            and not is_t_head
+            and not is_buf_t_head
+            and not ends_sentence
+            and (length_ok or is_fragmented or grammar_ok)
         )
 
         if not continues:
@@ -163,7 +236,8 @@ class PDFIngestionPipeline:
             page_number = index + 1
             started = time.perf_counter()
             try:
-                raw_text = reader.pages[index].extract_text() or ""
+                page_obj = reader.pages[index]
+                raw_text = page_obj.extract_text() or ""
                 error: Optional[str] = None
             except Exception as exc:  # noqa: BLE001 - never let one page abort a run
                 logger.warning("Text extraction failed on page %s of %s: %s",

@@ -75,12 +75,37 @@ UNIT_FAMILIES: Dict[str, str] = {
     "bps": "ratio",
     "x": "ratio",
     "days": "duration",
+    "day": "duration",
     "months": "duration",
+    "month": "duration",
     "years": "duration",
+    "year": "duration",
+    "weeks": "duration",
+    "week": "duration",
+    "hours": "duration",
+    "hour": "duration",
+    "hr": "duration",
+    "minutes": "duration",
+    "minute": "duration",
+    "seconds": "duration",
+    "second": "duration",
+    "ms": "duration",
+    "milliseconds": "duration",
+    "kb": "storage",
+    "mb": "storage",
+    "gb": "storage",
+    "tb": "storage",
+    "bytes": "storage",
+    "ghz": "frequency",
+    "mhz": "frequency",
+    "khz": "frequency",
+    "hz": "frequency",
+    "fps": "rate",
+    "flops": "compute",
+    "tps": "rate",
+    "qps": "rate",
 }
 
-# Generic measurement nouns that may follow a number. Deliberately broad and
-# domain-neutral; anything not listed still becomes a unit via the raw token.
 COUNT_UNIT_HINTS = {
     "tonnes", "tonne", "tons", "ton", "mt", "kg", "kt",
     "shipments", "parcels", "packages", "orders", "units", "customers",
@@ -88,6 +113,25 @@ COUNT_UNIT_HINTS = {
     "pincodes", "pin codes", "cities", "countries", "stores", "centres",
     "centers", "facilities", "vehicles", "trucks", "sqft", "acres", "hectares",
     "mw", "gw", "kwh", "barrels", "litres", "liters",
+    # General, academic, software, benchmarks & engineering nouns:
+    "issues", "issue", "repositories", "repository",
+    "benchmarks", "benchmark", "samples", "sample", "features", "feature",
+    "parameters", "parameter", "tokens", "token", "citations", "citation",
+    "papers", "paper", "works", "work", "studies", "study",
+    "steps", "step", "stages", "stage", "agents", "agent",
+    "tasks", "task", "nodes", "node", "queries", "query",
+    "modules", "module", "classes", "class",
+    "files", "file", "lines", "line", "commits", "commit",
+    "pull requests", "pull request", "endpoints", "endpoint",
+    "words", "word", "students", "developers",
+    "models", "model", "versions", "version", "layers", "layer",
+    "dimensions", "clusters", "runs", "run", "epochs", "epoch",
+    "iterations", "iteration", "rounds", "round", "milestones", "milestone",
+    "points", "items", "item", "cases", "case", "components", "component",
+    "seconds", "second", "minutes", "minute",
+    "hours", "hour", "hr", "days", "day", "weeks", "week",
+    "months", "month", "years", "year", "ms", "milliseconds",
+    "kb", "mb", "gb", "tb", "bytes",
 }
 
 # Legal / corporate suffixes stripped when canonicalising an entity name.
@@ -351,7 +395,7 @@ class FactNormalizer:
                     return code
             elif symbol in low:
                 return code
-        for hint in COUNT_UNIT_HINTS:
+        for hint in sorted(COUNT_UNIT_HINTS, key=len, reverse=True):
             if re.search(rf"\b{re.escape(hint)}\b", low):
                 return hint
         return None
@@ -374,9 +418,12 @@ class FactNormalizer:
             return "unknown"
         if unit in UNIT_FAMILIES:
             return UNIT_FAMILIES[unit]
-        if unit.lower() in COUNT_UNIT_HINTS:
+        low = unit.lower()
+        if low in UNIT_FAMILIES:
+            return UNIT_FAMILIES[low]
+        if low in COUNT_UNIT_HINTS or cls._singularise(low) in COUNT_UNIT_HINTS:
             return "count"
-        return "other"
+        return "count"
 
     @classmethod
     def units_comparable(cls, unit_a: Optional[str], unit_b: Optional[str]) -> bool:
@@ -394,7 +441,93 @@ class FactNormalizer:
             return False
         if fam_a == "currency" and unit_a != unit_b:
             return False
+        if fam_a == "count" and unit_a and unit_b:
+            if cls._singularise(unit_a.lower()) != cls._singularise(unit_b.lower()):
+                return False
         return True
+
+    # ------------------------------------------------------------------
+    # Semantic values & reconciliation
+    # ------------------------------------------------------------------
+    @classmethod
+    def normalize_semantic_value(cls, raw: str) -> str:
+        """Canonicalize a text-based/semantic value for comparison."""
+        if not raw:
+            return ""
+        s = strip_accents_and_controls(raw).strip()
+        s = re.sub(r"\s+", " ", s).lower()
+        s = re.sub(r"[^\w\s-]", " ", s)
+        drop = STOPWORDS | {"the", "a", "an", "with", "using", "via", "by", "of", "for", "in", "on", "at", "and", "or"}
+        tokens = [cls._singularise(t) for t in s.split() if t not in drop]
+        return " ".join(tokens)
+
+    @classmethod
+    def semantic_values_match(cls, val_a: str, val_b: str) -> Tuple[bool, float]:
+        """Test whether two semantic value representations corroborate.
+        
+        Returns (is_match, overlap_ratio).
+        """
+        norm_a = cls.normalize_semantic_value(val_a)
+        norm_b = cls.normalize_semantic_value(val_b)
+        if not norm_a or not norm_b:
+            return False, 0.0
+        if norm_a == norm_b:
+            return True, 1.0
+
+        set_a = set(norm_a.split())
+        set_b = set(norm_b.split())
+        if not set_a or not set_b:
+            return False, 0.0
+
+        shared = set_a & set_b
+        smaller = min(len(set_a), len(set_b))
+        overlap = len(shared) / smaller if smaller else 0.0
+
+        # High containment / Jaccard overlap indicates the same fact expressed differently
+        if overlap >= 0.65 or set_a.issubset(set_b) or set_b.issubset(set_a):
+            return True, round(overlap, 3)
+
+        return False, round(overlap, 3)
+
+    @classmethod
+    def is_semantic_contradiction(
+        cls, val_a: str, val_b: str, predicate: str
+    ) -> Tuple[bool, str]:
+        """Check if two differing semantic values represent a direct contradiction."""
+        norm_a = cls.normalize_semantic_value(val_a)
+        norm_b = cls.normalize_semantic_value(val_b)
+        if not norm_a or not norm_b or norm_a == norm_b:
+            return False, ""
+
+        # Status / state antonyms
+        antonyms = [
+            ({"active", "current"}, {"resigned", "former", "inactive", "retired"}),
+            ({"approved", "passed"}, {"rejected", "denied", "failed"}),
+            ({"true", "yes", "enabled"}, {"false", "no", "disabled"}),
+            ({"public"}, {"private"}),
+            ({"increase", "growth"}, {"decrease", "decline", "fall"}),
+            ({"autonomous", "automated"}, {"human", "manual", "review", "approval"}),
+            ({"mandatory", "required"}, {"optional", "none", "without", "no"}),
+        ]
+        tokens_a = set(norm_a.split())
+        tokens_b = set(norm_b.split())
+        for group1, group2 in antonyms:
+            if (tokens_a & group1 and tokens_b & group2) or (tokens_a & group2 and tokens_b & group1):
+                return True, f"Opposing states: '{val_a}' vs '{val_b}'"
+
+        # Predicates that are inherently single-valued
+        single_valued_cues = {
+            "status", "role", "designation", "degree", "institution", "university",
+            "venue", "author", "lead_author", "headquarters", "location", "director",
+            "state", "outcome", "winner", "president", "ceo", "mode", "type", "framework"
+        }
+        pred_tokens = set(predicate.lower().split("_"))
+        if pred_tokens & single_valued_cues:
+            shared = tokens_a & tokens_b
+            if not shared or (len(shared) / max(len(tokens_a), len(tokens_b))) < 0.25:
+                return True, f"Conflicting single-valued attribute '{predicate}': '{val_a}' vs '{val_b}'"
+
+        return False, ""
 
     # ------------------------------------------------------------------
     # Time periods
