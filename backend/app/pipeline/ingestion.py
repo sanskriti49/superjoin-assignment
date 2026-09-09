@@ -206,7 +206,7 @@ class PDFIngestionPipeline:
         try:
             meta = reader.metadata
             if meta and meta.title:
-                title = str(meta.title).strip() or None
+                title = strip_accents_and_controls(str(meta.title)).strip() or None
         except Exception:  # noqa: BLE001 - metadata is optional
             title = None
 

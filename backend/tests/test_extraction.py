@@ -113,3 +113,11 @@ class TestReflow:
     def test_short_standalone_lines_are_kept_apart(self):
         tiles = "₹8,142 Cr\nFY24 revenue from services\n740 Mn\nParcels shipped"
         assert canonicalize_page_text(tiles).count("\n") == 3
+
+    def test_surrogate_characters_do_not_crash_pipeline(self):
+        corrupt_text = "Operating profit reached \udc5a $50 million in 2024."
+        page, facts, _ = extract(corrupt_text)
+        assert "\udc5a" not in page
+        # Must safely encode to UTF-8 without raising UnicodeEncodeError
+        encoded = page.encode("utf-8")
+        assert b"$50 million" in encoded

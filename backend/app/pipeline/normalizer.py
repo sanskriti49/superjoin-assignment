@@ -175,10 +175,14 @@ STOPWORDS = {
 
 
 def strip_accents_and_controls(text: str) -> str:
-    """Remove control/format characters that PDF extraction leaves behind."""
+    """Remove control/format characters and lone surrogates that PDF extraction leaves behind."""
+    if not text:
+        return ""
+    # Strip lone surrogates (0xD800 to 0xDFFF) which cause 'surrogates not allowed' encoding errors
+    clean = "".join(ch for ch in text if not (0xD800 <= ord(ch) <= 0xDFFF))
     return "".join(
-        ch for ch in unicodedata.normalize("NFC", text)
-        if unicodedata.category(ch) not in ("Cf", "Cc") or ch in "\n\t"
+        ch for ch in unicodedata.normalize("NFC", clean)
+        if unicodedata.category(ch) not in ("Cf", "Cc", "Cs") or ch in "\n\t"
     )
 
 
