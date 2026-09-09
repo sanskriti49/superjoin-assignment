@@ -238,11 +238,12 @@ REJECT_GROUNDING = "evidence_quote_not_found_in_page_text"
 REJECT_DUPLICATE = "duplicate_of_higher_confidence_fact"
 REJECT_LLM_UNGROUNDED = "llm_quote_not_present_in_page_text"
 REJECT_LABEL_IS_UNIT = "label_names_a_unit_not_a_metric"
+REJECT_TOC_NAVIGATION = "table_of_contents_or_index_navigation"
 
 # Rejections that are expected on every page (page numbers, list markers, dates
-# in running text). They are counted but not stored one by one, because a
-# hundred thousand of them would bury the diagnostics that matter.
-ROUTINE_FILTERS = {REJECT_BARE_NUMBER, REJECT_LOOKS_LIKE_YEAR}
+# in running text, table of contents/index navigation). They are counted but not stored
+# one by one, because a hundred thousand of them would bury the diagnostics that matter.
+ROUTINE_FILTERS = {REJECT_BARE_NUMBER, REJECT_LOOKS_LIKE_YEAR, REJECT_TOC_NAVIGATION}
 
 MAX_LABEL_TOKENS = 8
 MIN_CONFIDENCE = 0.30
@@ -718,6 +719,49 @@ class FactExtractionPipeline:
     """Turns canonical page text into grounded facts plus rejection diagnostics."""
 
     @classmethod
+    def is_table_of_contents_page(cls, page_text: str) -> bool:
+        """Detect whether a page is a Table of Contents, Index, or list of figures/tables.
+
+        Navigational pages list sections, chapters, and page references rather than
+        stating empirical measurements.
+        """
+        if not page_text or len(page_text.strip()) < 20:
+            return False
+
+        lines = [ln.strip() for ln in page_text.strip().split("\n") if ln.strip()]
+        if not lines:
+            return False
+
+        # 1. Header check: does the page start with or prominently feature a TOC / Index title?
+        header_candidates = lines[:6]
+        has_toc_header = any(
+            re.match(
+                r"^(?:table\s+of\s+contents|contents|index(?:\s+of\s+[\w\s]+)?|"
+                r"list\s+of\s+(?:tables|figures|boxes|charts|illustrations|exhibits|appendices|abbreviations)|"
+                r"appendix\s+tables|brief\s+contents)\s*$",
+                c.lower().strip(),
+            )
+            for c in header_candidates
+        )
+
+        # 2. Count dot-leaders or dashed leaders leading to page numbers
+        dot_leaders = sum(
+            1 for ln in lines
+            if re.search(r"(?:\.{3,}|…{2,}|_{3,}|-{4,})\s*(?:[ivxlcdm]+|\d+)\s*$", ln, re.IGNORECASE)
+        )
+
+        # 3. Decision rule:
+        # A. Prominent TOC header with dot leaders or short directory list
+        if has_toc_header and (dot_leaders >= 1 or len(lines) <= 50):
+            return True
+
+        # B. Multiple dot leaders connecting headings to page numbers (unambiguous TOC/Index)
+        if dot_leaders >= 3:
+            return True
+
+        return False
+
+    @classmethod
     def extract_from_page(
         cls,
         doc_id: str,
@@ -738,6 +782,17 @@ class FactExtractionPipeline:
 
         if not page_text or len(page_text.strip()) < 20:
             return facts, issues
+
+        if cls.is_table_of_contents_page(page_text):
+            return facts, [{
+                "document_id": doc_id,
+                "page_number": page_number,
+                "candidate_text": "table_of_contents_page",
+                "context_snippet": page_text[:200].strip(),
+                "reason_code": REJECT_TOC_NAVIGATION,
+                "detail": cls._explain(REJECT_TOC_NAVIGATION, "table_of_contents_page"),
+                "is_routine_filter": True,
+            }]
 
         profile = profile or DocumentProfile()
         lines = cls._lines_with_offsets(page_text)
@@ -887,6 +942,10 @@ class FactExtractionPipeline:
         if (not groups["cur"] and not groups["pct"] and "." not in number_text
                 and len(number_text) == 4 and 1900 <= int(number_text) <= 2100):
             return reject(REJECT_LOOKS_LIKE_YEAR)
+
+        # Reject numbers that sit inside a Table of Contents / Index dot-leader line
+        if re.search(r"(?:\.{3,}|…{2,}|_{3,}|-{4,})\s*(?:[ivxlcdm]+|\d+)\s*$", candidate.line, re.IGNORECASE):
+            return reject(REJECT_TOC_NAVIGATION)
 
         label, strategy, label_span = cls._find_label(candidate)
         if not label:
@@ -1454,6 +1513,10 @@ class FactExtractionPipeline:
             REJECT_LLM_UNGROUNDED: (
                 f"The language model returned a fact whose quote does not appear in the page "
                 f"text. It was discarded as an unverifiable generation."
+            ),
+            REJECT_TOC_NAVIGATION: (
+                f"'{candidate_text}' appears inside a Table of Contents, Index, or "
+                f"navigational page reference rather than an empirical claim."
             ),
         }.get(reason, f"Rejected candidate '{candidate_text}'.")
 

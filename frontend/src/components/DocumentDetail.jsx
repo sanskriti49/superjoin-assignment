@@ -70,7 +70,12 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
   if (!detail) return <Loading what="the document" />;
 
   const { document: meta, facts, issues } = detail;
-  const byPage = facts.reduce((groups, fact) => {
+  const cleanFacts = (facts || []).filter((fact) => {
+    const q = fact.evidence?.quote || '';
+    if (/(?:\.{3,}|…{2,}|_{3,}|-{4,})\s*(?:[ivxlcdm]+|\d+)\s*$/i.test(q)) return false;
+    return true;
+  });
+  const byPage = cleanFacts.reduce((groups, fact) => {
     (groups[fact.evidence.page] ||= []).push(fact);
     return groups;
   }, {});

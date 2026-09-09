@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" fill="none">
+  <!-- Rounded Squircle Base -->
+  <rect width="32" height="32" rx="8" fill="#121318" />
+  <rect x="0.5" y="0.5" width="31" height="31" rx="7.5" stroke="#2a2d36" stroke-width="1" fill="none" />
+
+  <defs>
+    <!-- Superjoin Brand Gradient: Electric Indigo to Emerald -->
+    <linearGradient id="sj-grad" x1="4" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="50%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+    <linearGradient id="layer-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#34d399" stop-opacity="0.9" />
+    </linearGradient>
+  </defs>
+
+  <!-- Superjoin Intersecting Nodes / Relational Join -->
+  <circle cx="12" cy="13.5" r="5.5" stroke="url(#sj-grad)" stroke-width="2.2" stroke-linecap="round" />
+  <circle cx="20" cy="13.5" r="5.5" stroke="url(#sj-grad)" stroke-width="2.2" stroke-linecap="round" />
+
+  <!-- Central Nexus Connection Spark (Grounded Verified Fact) -->
+  <circle cx="16" cy="13.5" r="2.2" fill="#ffffff" />
+  <circle cx="16" cy="13.5" r="1.1" fill="#10b981" />
+
+  <!-- Fact Knowledge Layer: Horizontal Stacked Foundation Strata -->
+  <path d="M7 23C7 23 11.5 21.5 16 21.5C20.5 21.5 25 23 25 23" stroke="url(#layer-grad)" stroke-width="2" stroke-linecap="round" />
+  <path d="M9.5 26.2C9.5 26.2 12.5 25 16 25C19.5 25 22.5 26.2 22.5 26.2" stroke="#4ade80" stroke-opacity="0.55" stroke-width="1.8" stroke-linecap="round" />
+</svg>

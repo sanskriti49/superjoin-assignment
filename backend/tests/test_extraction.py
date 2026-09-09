@@ -121,3 +121,31 @@ class TestReflow:
         # Must safely encode to UTF-8 without raising UnicodeEncodeError
         encoded = page.encode("utf-8")
         assert b"$50 million" in encoded
+
+
+class TestTableOfContentsSkipping:
+    def test_table_of_contents_page_is_skipped(self):
+        toc_text = (
+            "TABLE OF CONTENTS\n"
+            "Section I: General Overview ................................. 1\n"
+            "Section II: Financial Performance (At 2011-12 prices) ...... 15\n"
+            "Section III: Balance Sheet and Accounts .................... 45\n"
+            "Appendix Tables ........................................... 120\n"
+        )
+        assert FactExtractionPipeline.is_table_of_contents_page(toc_text)
+        facts, issues = FactExtractionPipeline.extract_from_page(
+            doc_id="test_doc", page_number=1, page_text=toc_text
+        )
+        assert len(facts) == 0
+        assert any(i["reason_code"] == "table_of_contents_or_index_navigation" for i in issues)
+
+    def test_dot_leader_line_in_mixed_page_is_rejected(self):
+        mixed_text = (
+            "Operating revenue reached $150 million in 2024.\n"
+            "Detailed Segment Analysis ................................. 45\n"
+        )
+        facts, _ = FactExtractionPipeline.extract_from_page(
+            doc_id="test_doc", page_number=2, page_text=mixed_text
+        )
+        assert len(facts) == 1
+        assert facts[0]["value_raw"] == "$150 million"
