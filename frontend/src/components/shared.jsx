@@ -36,6 +36,123 @@ export function Empty({ children }) {
   return <p className="empty">{children}</p>;
 }
 
+/**
+ * Ensures metric titles are informative, descriptive, and concise (not overly verbose sentences),
+ * replacing vague abbreviations like 'YoY', 'QoQ', or disclaimer snippets like 'Note Due to rounding off'.
+ */
+export function formatFactTitle(fact, contextFacts = []) {
+  if (!fact) return '';
+  let raw = (fact.predicate_label || '').trim();
+
+  // 1. Strip leading noise like "s real GDP" -> "Real GDP", "Contrast Food Inflation" -> "Food Inflation"
+  raw = raw.replace(/^s\s+/i, '');
+  raw = raw.replace(/^(?:contrast|notably|similarly|subsequently)\s+/i, '');
+
+  // 2. Cut verbose exclusion/disclaimer tails ("Revenue from services excludes revenue from traded goods" -> "Revenue from services")
+  const cutMatch = raw.match(/^(.*?)\s+(?:excludes?|excluding|excl\.?|due to|as per|rounded to)\b/i);
+  if (cutMatch && cutMatch[1].trim().length >= 4) {
+    raw = cutMatch[1].trim();
+  }
+
+  // 3. Clean up trailing auxiliary verbs ("Headline inflation has" -> "Headline inflation")
+  raw = raw.replace(/\s+(?:has|have|is|are|was|were)$/i, '');
+
+  // 4. Check if label is still vague or a disclaimer
+  const low = raw.toLowerCase();
+  const isComparison = (
+    low === 'yoy'
+    || low === 'qoq'
+    || low === 'mom'
+    || low === 'yoy yoy'
+    || low === 'y-o-y'
+    || low === 'q-o-q'
+    || low === 'performance'
+    || low === 'growth'
+    || low === 'change'
+    || low === 'figure'
+    || low === 'addition'
+    || low === '000 tons'
+    || low === 'tons'
+    || low === 'mn'
+  );
+
+  const isDisclaimer = (
+    low.startsWith('note')
+    || low.startsWith('disclaimer')
+    || low.startsWith('source')
+    || low.startsWith('footnote')
+  );
+
+  // If it's a disclaimer note (e.g. "Note Due to rounding off totals may"), represent what was actually measured
+  if (isDisclaimer) {
+    if (fact.unit === '%' || fact.unit_family === 'ratio') {
+      return fact.subject ? `${fact.subject} Segment Share (%)` : 'Segment Distribution (%)';
+    }
+    return fact.subject ? `${fact.subject} Distribution Share` : 'Distribution Share';
+  }
+
+  // If it's a vague comparison qualifier like "YoY" or "QoQ", enrich it
+  if (isComparison) {
+    const compLabel = low.includes('qoq') ? 'QoQ' : low.includes('mom') ? 'MoM' : 'YoY';
+
+    // A. First look backwards in contextFacts (from the same page or list) for the parent metric
+    if (Array.isArray(contextFacts) && contextFacts.length > 0) {
+      const myIndex = contextFacts.findIndex((f) => f && f.id === fact.id);
+      if (myIndex > 0) {
+        for (let i = myIndex - 1; i >= 0; i--) {
+          const candidate = contextFacts[i];
+          if (!candidate) continue;
+          const candRaw = (candidate.predicate_label || '').trim();
+          const candLow = candRaw.toLowerCase();
+          if (
+            candRaw.length >= 4
+            && !candLow.includes('yoy')
+            && !candLow.includes('qoq')
+            && !candLow.startsWith('note')
+            && !candLow.startsWith('source')
+            && candLow !== 'performance'
+          ) {
+            const cleanCand = candRaw.replace(/\s+(?:excludes?|due to).*$/i, '').trim();
+            return `${cleanCand} (${compLabel})`;
+          }
+        }
+      }
+    }
+
+    // B. Next check evidence quote for a metric noun phrase
+    const quote = fact.evidence_quote || fact.evidence?.quote || '';
+    if (quote) {
+      const cleanQuote = quote
+        .replace(/\(1\)|\(2\)|\(3\)|\(\d+\)|Note:.*$/gi, '')
+        .replace(/[-−(]?\s*[\d,]+(?:\.\d+)?%?\)?/g, '')
+        .replace(/YoY[:\s]*|QoQ[:\s]*|MoM[:\s]*/gi, '')
+        .replace(/[₹$€£¥]/g, '')
+        .trim();
+
+      const candidates = cleanQuote.split(/[;\n/]/).map((s) => s.trim()).filter((s) => s.length >= 4);
+      if (candidates.length > 0) {
+        const best = candidates[0].replace(/^[-–—:,\s]+|[-–—:,\s]+$/g, '');
+        if (best.length >= 4 && best.length <= 50 && !best.toLowerCase().startsWith('note')) {
+          return `${best} (${compLabel})`;
+        }
+      }
+    }
+
+    // C. Fallback: qualify with subject
+    const subjectPrefix = (fact.subject && fact.subject !== 'Unspecified') ? `${fact.subject} ` : '';
+    if (low.includes('qoq')) return `${subjectPrefix}QoQ Growth`.trim();
+    if (low.includes('mom')) return `${subjectPrefix}MoM Growth`.trim();
+    return `${subjectPrefix}YoY Growth`.trim();
+  }
+
+  // If label is too short or just bare punctuation
+  if (raw.length <= 3 && !/\d/.test(raw)) {
+    return fact.subject ? `${fact.subject} Metric` : raw;
+  }
+
+  return raw;
+}
+
 /** A quote with the measured value marked, so the reader sees what was read. */
 export function Quote({ text, value }) {
   if (!text) return null;

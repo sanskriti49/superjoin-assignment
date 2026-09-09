@@ -932,6 +932,9 @@ class FactExtractionPipeline:
             # "the figure of 11.4 per cent" says where the number is printed,
             # not what it measures.
             return reject(REJECT_LABEL_IS_UNIT)
+        pred_tokens = predicate_key.split("_")
+        if pred_tokens and pred_tokens[0] in {"note", "notes", "disclaimer", "source", "sources", "footnote", "annexure", "appendix"}:
+            return reject(REJECT_LABEL_IS_UNIT)
 
         mantissa, unit, normalized = FactNormalizer.parse_numeric_value(raw_quantity)
         if mantissa is None:
@@ -1021,6 +1024,15 @@ class FactExtractionPipeline:
 
         label = cls._clean_label(cls._label_from_prefix(prefix))
         if label:
+            comp_terms = {"yoy", "qoq", "mom", "y-o-y", "q-o-q", "m-o-m"}
+            if label.lower() in comp_terms:
+                context_label = None
+                if candidate.prev_line:
+                    context_label = cls._clean_label(cls._label_from_neighbour(candidate.prev_line))
+                if context_label and context_label.lower() not in comp_terms:
+                    label = f"{context_label} ({label})"
+                else:
+                    label = f"{label} Growth"
             return label, "prose", (max(candidate.scan_start, start - 220), end)
 
         label = cls._clean_label(cls._label_from_suffix(suffix))
@@ -1138,6 +1150,15 @@ class FactExtractionPipeline:
         # not part of the metric's name.
         while len(tokens) > 1 and tokens[0].lower().endswith("ly") and len(tokens[0]) > 4:
             tokens.pop(0)
+
+        # Reject structural boilerplate that introduces notes, sources, or disclaimers
+        if tokens and tokens[0].lower() in {"note", "notes", "disclaimer", "source", "sources", "footnote", "annexure", "appendix"}:
+            return None
+
+        # If label contains exclusion clause ("Revenue from services excludes..."), cut at the exclusion
+        exclusion_match = re.split(r"\b(?:excludes?|excluding|excl\.?)\b", label, maxsplit=1, flags=re.IGNORECASE)
+        if len(exclusion_match) > 1 and len(exclusion_match[0].strip()) >= 3:
+            return cls._clean_label(exclusion_match[0].strip())
 
         # An English noun phrase ends in its head noun. Anything ending in a
         # reporting verb is a fragment, not a metric name.

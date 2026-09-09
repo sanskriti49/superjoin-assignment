@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { getFact, getFacts } from '../api';
 import {
-  Attributes, Dialog, DialogHead, Empty, Loading, Quote, Verdict, formatNumber, percent,
+  Attributes, Dialog, DialogHead, Empty, Loading, Quote, Verdict, formatFactTitle, formatNumber, percent,
 } from './shared';
 
 const PAGE_SIZE = 60;
@@ -145,7 +145,7 @@ export default function Facts({ documents, initialDocumentId, onOpenDocument }) 
                         title="Show the sentence this was read from"
                         onClick={() => setSelected(fact.id)}
                       >
-                        {fact.predicate_label}
+                        {formatFactTitle(fact, data.items)}
                       </button>
                     </td>
                     <td className="num">{fact.value_raw}</td>
@@ -218,12 +218,12 @@ function FactDialog({ factId, onClose }) {
   }, [factId]);
 
   return (
-    <Dialog title={fact ? fact.predicate_label : 'Fact'} onClose={onClose}>
+    <Dialog title={fact ? formatFactTitle(fact) : 'Fact'} onClose={onClose}>
       {!fact ? (
         <Loading what="the fact" />
       ) : (
         <>
-          <DialogHead onClose={onClose}>{fact.predicate_label}</DialogHead>
+          <DialogHead onClose={onClose}>{formatFactTitle(fact)}</DialogHead>
 
           <p className="mono" style={{ fontSize: 20, margin: 0 }}>{fact.value_raw}</p>
 

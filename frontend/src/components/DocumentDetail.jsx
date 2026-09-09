@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { deleteDocument, getDocument, getPage } from '../api';
-import { Dialog, DialogHead, Empty, Loading, PageContentView, Quote, formatNumber, percent } from './shared';
+import { Dialog, DialogHead, Empty, Loading, PageContentView, Quote, formatFactTitle, formatNumber, percent } from './shared';
 
 // Long documents list hundreds of pages of facts. Showing a readable slice and
 // letting the reader ask for the rest beats both a wall of tables and a silent
@@ -148,7 +148,7 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
                   <tbody>
                     {byPage[pageNumber].map((fact) => (
                       <tr key={fact.id}>
-                        <td style={{ width: '38%' }}>{fact.predicate_label}</td>
+                        <td style={{ width: '38%' }}>{formatFactTitle(fact, byPage[pageNumber])}</td>
                         <td className="num" style={{ width: 140 }}>{fact.value_raw}</td>
                         <td className="num muted" style={{ width: 120 }}>
                           {fact.time_period_normalized || 'unstated'}
@@ -286,7 +286,7 @@ function PageModal({ page, onClose }) {
                 {page.facts.map((fact) => (
                   <tr key={fact.id} style={{ borderBottom: '1px solid var(--rule)' }}>
                     <td style={{ padding: '10px 10px', fontWeight: 500, color: 'var(--ink)' }}>
-                      {fact.predicate_label}
+                      {formatFactTitle(fact, page.facts)}
                     </td>
                     <td className="num" style={{ textAlign: 'right', padding: '10px 10px', fontWeight: 600 }}>
                       {fact.value_raw}
