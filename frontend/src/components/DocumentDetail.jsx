@@ -46,7 +46,11 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
 
   const showPage = async (pageNumber) => {
     try {
-      setPage(await getPage(documentId, pageNumber));
+      const pageData = await getPage(documentId, pageNumber);
+      setPage({
+        ...pageData,
+        facts: byPage[pageNumber] || [],
+      });
     } catch (error) {
       onNotify(error.message);
     }
@@ -210,43 +214,99 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
 }
 
 function PageModal({ page, onClose }) {
-  const [viewMode, setViewMode] = useState('table'); // 'table' or 'raw'
+  const [viewMode, setViewMode] = useState(page.facts?.length ? 'facts' : 'formatted');
 
   return (
     <Dialog
       title={`Page ${page.page_number} as stored`}
       onClose={onClose}
-      style={{ maxWidth: 900, width: '95vw' }}
+      style={{ maxWidth: 960, width: '95vw' }}
     >
       <DialogHead onClose={onClose}>
         {`Page ${page.page_number} as stored`}
       </DialogHead>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
         <p className="prose muted" style={{ margin: 0 }}>
-          This is the canonical page text every evidence quote from this page is cut from.
+          {viewMode === 'facts'
+            ? `Structured facts extracted from page ${page.page_number}.`
+            : `Canonical text and layout from page ${page.page_number}.`}
         </p>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {Boolean(page.facts?.length) && (
+            <button
+              className={`action quiet ${viewMode === 'facts' ? 'active' : ''}`}
+              style={{
+                fontWeight: viewMode === 'facts' ? 600 : 400,
+                borderBottom: viewMode === 'facts' ? '2px solid var(--ink)' : '2px solid transparent',
+                padding: '4px 8px',
+              }}
+              onClick={() => setViewMode('facts')}
+            >
+              Extracted Table ({page.facts.length})
+            </button>
+          )}
           <button
-            className={`action quiet ${viewMode === 'table' ? 'active' : ''}`}
-            style={{ fontWeight: viewMode === 'table' ? 600 : 400, borderBottom: viewMode === 'table' ? '2px solid var(--ink)' : 'none' }}
-            onClick={() => setViewMode('table')}
+            className={`action quiet ${viewMode === 'formatted' ? 'active' : ''}`}
+            style={{
+              fontWeight: viewMode === 'formatted' ? 600 : 400,
+              borderBottom: viewMode === 'formatted' ? '2px solid var(--ink)' : '2px solid transparent',
+              padding: '4px 8px',
+            }}
+            onClick={() => setViewMode('formatted')}
           >
-            Formatted Table
+            Formatted Text
           </button>
           <button
             className={`action quiet ${viewMode === 'raw' ? 'active' : ''}`}
-            style={{ fontWeight: viewMode === 'raw' ? 600 : 400, borderBottom: viewMode === 'raw' ? '2px solid var(--ink)' : 'none' }}
+            style={{
+              fontWeight: viewMode === 'raw' ? 600 : 400,
+              borderBottom: viewMode === 'raw' ? '2px solid var(--ink)' : '2px solid transparent',
+              padding: '4px 8px',
+            }}
             onClick={() => setViewMode('raw')}
           >
-            Raw Text
+            Raw Stream
           </button>
         </div>
       </div>
 
-      <div style={{ maxHeight: '65vh', overflowY: 'auto', border: '1px solid var(--rule)', padding: '14px 18px', background: 'var(--paper-raised)' }}>
-        {viewMode === 'table' ? (
+      <div style={{ maxHeight: '65vh', overflowY: 'auto', border: '1px solid var(--rule)', padding: '16px 20px', background: 'var(--paper-raised)' }}>
+        {viewMode === 'facts' && (
+          <div className="scroller">
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--rule-strong)' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 10px', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>Metric / Description</th>
+                  <th style={{ textAlign: 'right', padding: '8px 10px', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>Measured Value</th>
+                  <th style={{ textAlign: 'center', padding: '8px 10px', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>Period</th>
+                  <th style={{ textAlign: 'right', padding: '8px 10px', fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>Confidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {page.facts.map((fact) => (
+                  <tr key={fact.id} style={{ borderBottom: '1px solid var(--rule)' }}>
+                    <td style={{ padding: '10px 10px', fontWeight: 500, color: 'var(--ink)' }}>
+                      {fact.predicate_label}
+                    </td>
+                    <td className="num" style={{ textAlign: 'right', padding: '10px 10px', fontWeight: 600 }}>
+                      {fact.value_raw}
+                    </td>
+                    <td className="num muted" style={{ textAlign: 'center', padding: '10px 10px' }}>
+                      {fact.time_period_normalized || 'unstated'}
+                    </td>
+                    <td className="num muted" style={{ textAlign: 'right', padding: '10px 10px' }}>
+                      {percent(fact.confidence)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {viewMode === 'formatted' && (
           <PageContentView text={page.text} />
-        ) : (
+        )}
+        {viewMode === 'raw' && (
           <Quote text={page.text} />
         )}
       </div>
