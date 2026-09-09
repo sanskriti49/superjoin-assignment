@@ -51,50 +51,81 @@ export function Quote({ text, value }) {
 }
 
 /**
- * Renders page text intelligently: detects when lines look like table rows
- * (multiple numbers/tokens) and renders them in an aligned grid/table, while
- * preserving titles and prose lines cleanly.
+ * Renders page text intelligently: detects when multiple consecutive lines form
+ * an actual multi-column table (matching column counts), and renders them in an
+ * aligned grid/table, while presenting presentation titles, KPI blocks, and prose
+ * with readable line formatting.
  */
 export function PageContentView({ text }) {
   if (!text) return null;
 
-  const lines = text.split('\n').map((ln) => ln.trim()).filter(Boolean);
+  const rawLines = text.split('\n').map((ln) => ln.trim()).filter(Boolean);
 
-  // Group consecutive lines that look like table data (contain 3 or more numbers/tokens)
-  const blocks = [];
-  let currentTable = null;
+  // Identify lines that look like table data rows or headers
+  const parsedLines = rawLines.map((line) => {
+    // A table header with multiple periods/quarters/categories
+    const isPeriodHeader = /(?:Q[1-4]\s*(?:FY\d{2,4})?|FY\d{2,4}|YoY|QoQ|H[1-2])/i.test(line) && line.split(/\s+/).length >= 3;
+    const numberMatches = line.match(/[-−(]?\s*[\d,]+(?:\.\d+)?%?\)?/g) || [];
+    const hasManyNumbers = numberMatches.length >= 3;
 
-  lines.forEach((line) => {
-    // Check if line looks like structured data (header or row with multiple numeric/quarterly cells)
-    const tokens = line.split(/\s{2,}|\t/).map((t) => t.trim()).filter(Boolean);
-    const hasMultipleNumbers = (line.match(/[-−(]?\d+(?:\.\d+)?%?\)?/g) || []).length >= 3;
-    const isQuarterlyHeader = /Q[1-4]|FY\d{2,4}|YoY|QoQ/i.test(line) && line.split(/\s+/).length >= 4;
-
-    if (hasMultipleNumbers || isQuarterlyHeader || (tokens.length >= 3)) {
-      const rowCells = tokens.length >= 3 ? tokens : line.split(/\s+/);
-      if (!currentTable) {
-        currentTable = [];
-        blocks.push({ type: 'table', rows: currentTable });
+    let cells = null;
+    if (isPeriodHeader) {
+      cells = line.split(/\s{2,}|\t/).filter(Boolean);
+      if (cells.length < 3) cells = line.split(/\s+/);
+    } else if (hasManyNumbers) {
+      // Split leading text label from trailing numeric sequence
+      const match = line.match(/^(.*?)((\s+[-−(]?\s*[\d,]+(?:\.\d+)?%?\)?)+)$/);
+      if (match) {
+        const label = match[1].trim();
+        const vals = match[2].trim().split(/\s+/);
+        cells = label ? [label, ...vals] : vals;
+      } else {
+        cells = line.split(/\s{2,}|\t/);
       }
-      currentTable.push(rowCells);
-    } else {
-      currentTable = null;
-      blocks.push({ type: 'line', text: line });
     }
+
+    return {
+      raw: line,
+      isTableCandidate: Boolean(cells && cells.length >= 3),
+      cells: cells || [line],
+    };
   });
 
+  // Group into blocks: ONLY treat as table if at least 2 consecutive lines qualify
+  const blocks = [];
+  let i = 0;
+  while (i < parsedLines.length) {
+    if (parsedLines[i].isTableCandidate && i + 1 < parsedLines.length && parsedLines[i + 1].isTableCandidate) {
+      // Collect consecutive table rows
+      const tableRows = [];
+      while (i < parsedLines.length && parsedLines[i].isTableCandidate) {
+        tableRows.push(parsedLines[i].cells);
+        i += 1;
+      }
+      blocks.push({ type: 'table', rows: tableRows });
+    } else {
+      blocks.push({ type: 'line', text: parsedLines[i].raw });
+      i += 1;
+    }
+  }
+
   return (
-    <div className="page-content-view" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div className="page-content-view" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {blocks.map((block, idx) => {
         if (block.type === 'line') {
+          const isTitle = block.text.length < 60 && !/[.!?:;]$/.test(block.text) && !/^\d/.test(block.text);
+          const isKPI = /^\d+(?:\.\d+)?%?$|^[-−(]?\s*[\d,]+(?:\.\d+)?%?\)?$/.test(block.text);
+
           return (
             <div
               key={idx}
               style={{
-                fontSize: 14.5,
-                fontWeight: block.text.length < 50 && !/[.!?]$/.test(block.text) ? 600 : 400,
-                color: 'var(--ink)',
-                fontFamily: 'var(--serif)',
+                fontSize: isTitle ? 16 : isKPI ? 20 : 14.5,
+                fontWeight: isTitle ? 600 : isKPI ? 600 : 400,
+                fontFamily: isKPI ? 'var(--mono)' : 'var(--serif)',
+                color: isTitle ? 'var(--ink)' : isKPI ? 'var(--ink)' : 'var(--ink-soft)',
+                padding: isTitle ? '6px 0 2px' : '2px 0',
+                lineHeight: 1.5,
               }}
             >
               {block.text}
@@ -102,25 +133,41 @@ export function PageContentView({ text }) {
           );
         }
 
-        // Table block
+        // Multi-row table block
         const maxCols = Math.max(...block.rows.map((r) => r.length));
         return (
-          <div key={idx} className="scroller" style={{ border: '1px solid var(--rule)', background: 'var(--paper-raised)', padding: 10 }}>
-            <table style={{ minWidth: maxCols > 6 ? 720 : '100%' }}>
+          <div
+            key={idx}
+            className="scroller"
+            style={{
+              border: '1px solid var(--rule)',
+              background: 'var(--paper-raised)',
+              margin: '8px 0',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+            }}
+          >
+            <table style={{ minWidth: maxCols > 5 ? 700 : '100%', width: '100%', borderCollapse: 'collapse' }}>
               <tbody>
                 {block.rows.map((row, rIdx) => {
                   const isHeader = rIdx === 0 && row.some((c) => /FY|Q\d|QoQ|YoY|Date|Year|Month/i.test(c));
                   return (
-                    <tr key={rIdx} style={{ background: isHeader ? 'var(--paper-sunk)' : 'transparent' }}>
+                    <tr
+                      key={rIdx}
+                      style={{
+                        background: isHeader ? 'var(--paper-sunk)' : 'transparent',
+                        borderBottom: '1px solid var(--rule)',
+                      }}
+                    >
                       {row.map((cell, cIdx) => (
                         <td
                           key={cIdx}
                           className={/\d/.test(cell) ? 'num' : ''}
                           style={{
-                            padding: '6px 10px',
-                            fontWeight: isHeader || cIdx === 0 ? 600 : 400,
+                            padding: '8px 12px',
+                            fontWeight: isHeader || (cIdx === 0 && !/\d/.test(cell)) ? 600 : 400,
                             fontSize: 13,
                             whiteSpace: 'nowrap',
+                            textAlign: cIdx > 0 && /[\d%]/.test(cell) ? 'right' : 'left',
                           }}
                         >
                           {cell}
