@@ -40,9 +40,9 @@ export function Empty({ children }) {
 export function Quote({ text, value }) {
   if (!text) return null;
   const at = value ? text.indexOf(value) : -1;
-  if (at === -1) return <blockquote className="quote">{text}</blockquote>;
+  if (at === -1) return <blockquote className="quote" style={{ whiteSpace: 'pre-wrap' }}>{text}</blockquote>;
   return (
-    <blockquote className="quote">
+    <blockquote className="quote" style={{ whiteSpace: 'pre-wrap' }}>
       {text.slice(0, at)}
       <mark>{text.slice(at, at + value.length)}</mark>
       {text.slice(at + value.length)}

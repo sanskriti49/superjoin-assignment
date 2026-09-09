@@ -208,9 +208,11 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
             {`Page ${page.page_number} as stored`}
           </DialogHead>
           <p className="prose muted">
-            This is the exact text every evidence quote from this page is cut from.
+            This is the canonical page text every evidence quote from this page is cut from.
           </p>
-          <Quote text={page.text} />
+          <div style={{ maxHeight: '60vh', overflowY: 'auto', border: '1px solid var(--rule)', padding: '12px 16px', background: 'var(--paper-raised)', marginTop: 12 }}>
+            <Quote text={page.text} />
+          </div>
         </Dialog>
       )}
     </div>
