@@ -69,7 +69,7 @@ There are no credentials in the repository and none are needed to run it.
 
 ## 2. Video demo
 
-`[demo video link]`
+`https://drive.google.com/file/d/1J0hZ8Cb5p728INNgeUEvqwwpArDWWQYr/view?usp=sharing`
 
 Suggested walkthrough:
 
