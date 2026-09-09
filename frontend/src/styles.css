@@ -445,7 +445,25 @@ dl.attrs dd { margin: 0; }
   font-size: 14px;
   z-index: 30;
   max-width: 78vw;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
+
+/* One notice per line, each with its own way out. A problem stays on screen
+   until it has been read; a confirmation clears itself. */
+.toast-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.toast-line + .toast-line { border-top: 1px solid rgba(255, 255, 255, 0.18); padding-top: 8px; }
+
+.toast-line button { color: var(--paper); opacity: 0.7; }
+.toast-line button:hover { opacity: 1; }
+.toast-line[data-tone='error'] span { color: #ffb3a7; }
 
 .tabs {
   display: flex;

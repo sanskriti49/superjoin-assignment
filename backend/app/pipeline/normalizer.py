@@ -75,63 +75,70 @@ UNIT_FAMILIES: Dict[str, str] = {
     "bps": "ratio",
     "x": "ratio",
     "days": "duration",
-    "day": "duration",
     "months": "duration",
-    "month": "duration",
     "years": "duration",
-    "year": "duration",
-    "weeks": "duration",
-    "week": "duration",
-    "hours": "duration",
-    "hour": "duration",
-    "hr": "duration",
-    "minutes": "duration",
-    "minute": "duration",
-    "seconds": "duration",
-    "second": "duration",
-    "ms": "duration",
-    "milliseconds": "duration",
-    "kb": "storage",
-    "mb": "storage",
-    "gb": "storage",
-    "tb": "storage",
-    "bytes": "storage",
-    "ghz": "frequency",
-    "mhz": "frequency",
-    "khz": "frequency",
-    "hz": "frequency",
-    "fps": "rate",
-    "flops": "compute",
-    "tps": "rate",
-    "qps": "rate",
 }
 
-COUNT_UNIT_HINTS = {
-    "tonnes", "tonne", "tons", "ton", "mt", "kg", "kt",
-    "shipments", "parcels", "packages", "orders", "units", "customers",
-    "employees", "people", "persons", "households", "users", "subscribers",
-    "pincodes", "pin codes", "cities", "countries", "stores", "centres",
-    "centers", "facilities", "vehicles", "trucks", "sqft", "acres", "hectares",
-    "mw", "gw", "kwh", "barrels", "litres", "liters",
-    # General, academic, software, benchmarks & engineering nouns:
-    "issues", "issue", "repositories", "repository",
-    "benchmarks", "benchmark", "samples", "sample", "features", "feature",
-    "parameters", "parameter", "tokens", "token", "citations", "citation",
-    "papers", "paper", "works", "work", "studies", "study",
-    "steps", "step", "stages", "stage", "agents", "agent",
-    "tasks", "task", "nodes", "node", "queries", "query",
-    "modules", "module", "classes", "class",
-    "files", "file", "lines", "line", "commits", "commit",
-    "pull requests", "pull request", "endpoints", "endpoint",
-    "words", "word", "students", "developers",
-    "models", "model", "versions", "version", "layers", "layer",
-    "dimensions", "clusters", "runs", "run", "epochs", "epoch",
-    "iterations", "iteration", "rounds", "round", "milestones", "milestone",
-    "points", "items", "item", "cases", "case", "components", "component",
-    "seconds", "second", "minutes", "minute",
-    "hours", "hour", "hr", "days", "day", "weeks", "week",
-    "months", "month", "years", "year", "ms", "milliseconds",
-    "kb", "mb", "gb", "tb", "bytes",
+# Physical unit symbols. This is the one closed vocabulary in the system, and
+# it is closed because SI and its common commercial cousins are: a watt-hour
+# means the same thing in an energy report and a data-centre filing. Anything
+# else that counts something is recognised by shape (see ``measurement_token``)
+# rather than by being listed here, which is what lets a document introduce
+# "outpatient visits" or "teaching hours" without a code change.
+#
+# Single letter symbols ("m", "g", "t") are excluded: they collide with
+# magnitude words and initials far more often than they carry a measurement.
+UNIT_SYMBOLS: Dict[str, str] = {
+    # energy / power
+    "wh": "energy", "kwh": "energy", "mwh": "energy", "gwh": "energy",
+    "twh": "energy", "kw": "power", "mw": "power", "gw": "power", "tw": "power",
+    "kva": "power", "mva": "power", "btu": "energy", "kcal": "energy",
+    # distance / area / volume
+    "km": "distance", "cm": "distance", "mm": "distance", "nm": "distance",
+    "mi": "distance", "ft": "distance", "sqft": "area", "sqm": "area",
+    "ha": "area", "acre": "area", "km2": "area", "ml": "volume",
+    "cl": "volume", "bbl": "volume", "gal": "volume", "cbm": "volume",
+    # mass
+    "kg": "mass", "mg": "mass", "kt": "mass", "mt": "mass", "lb": "mass",
+    "lbs": "mass", "oz": "mass",
+    # information / frequency / pressure / other
+    "kb": "data", "mb": "data", "gb": "data", "tb": "data", "pb": "data",
+    "hz": "frequency", "khz": "frequency", "mhz": "frequency", "ghz": "frequency",
+    "psi": "pressure", "bar": "pressure", "db": "sound",
+    "ppm": "concentration", "mmhg": "pressure",
+}
+
+# Unit words spelled out. Kept short on purpose: a plural noun is recognised by
+# shape, so this only names the singular forms that would otherwise be missed.
+UNIT_WORDS: Dict[str, str] = {
+    "tonne": "mass", "tonnes": "mass", "ton": "mass", "tons": "mass",
+    "gram": "mass", "grams": "mass", "kilogram": "mass", "kilograms": "mass",
+    "litre": "volume", "litres": "volume", "liter": "volume", "liters": "volume",
+    "metre": "distance", "metres": "distance", "meter": "distance",
+    "meters": "distance", "kilometre": "distance", "kilometres": "distance",
+    "kilometer": "distance", "kilometers": "distance", "mile": "distance",
+    "miles": "distance", "acre": "area", "acres": "area", "hectare": "area",
+    "hectares": "area", "day": "duration", "days": "duration",
+    "week": "duration", "weeks": "duration", "month": "duration",
+    "months": "duration", "year": "duration", "years": "duration",
+    "hour": "duration", "hours": "duration", "minute": "duration",
+    "minutes": "duration", "second": "duration", "seconds": "duration",
+}
+
+# Words that may sit directly after a number without being what is measured:
+# reporting verbs, comparison words and connectives. A number followed by one
+# of these is not a counted quantity.
+NON_UNIT_FOLLOWERS = {
+    "and", "or", "but", "than", "then", "versus", "vs", "compared", "against",
+    "respectively", "each", "more", "less", "fewer", "higher", "lower", "above",
+    "below", "over", "under", "around", "about", "approximately", "nearly",
+    "almost", "times", "point", "points", "further", "additional", "new",
+    "other", "such", "same", "different", "including", "excluding", "namely",
+    "was", "were", "is", "are", "be", "been", "being", "has", "have", "had",
+    "will", "would", "may", "might", "can", "could", "should", "must",
+    "reported", "recorded", "registered", "estimated", "projected", "expected",
+    "stood", "stands", "reached", "totalled", "totaled", "amounted", "rose",
+    "grew", "fell", "declined", "increased", "decreased", "remained",
 }
 
 # Legal / corporate suffixes stripped when canonicalising an entity name.
@@ -173,6 +180,52 @@ def strip_accents_and_controls(text: str) -> str:
         ch for ch in unicodedata.normalize("NFC", text)
         if unicodedata.category(ch) not in ("Cf", "Cc") or ch in "\n\t"
     )
+
+
+def measurement_token(token: Optional[str]) -> Optional[Tuple[str, str]]:
+    """Decide whether a word sitting after a number states what is measured.
+
+    Returns ``(canonical_unit, family)`` or ``None``. Three shapes qualify, none
+    of which needs the word to have been seen before:
+
+    * a physical unit symbol ("MW", "kWh", "kg"),
+    * a spelled-out unit ("tonnes", "days", "kilometres"),
+    * any plural common noun ("visits", "students", "shipments", "beds").
+
+    The third rule is the one that makes the extractor document-agnostic. A
+    document may count anything it likes, and English marks a counted noun by
+    making it plural, so the shape of the word carries the information that a
+    list of allowed nouns would otherwise have to supply.
+    """
+    if not token:
+        return None
+    raw = token.strip().strip(".,;:")
+    if not raw or not raw[0].isalpha():
+        return None
+
+    low = raw.lower()
+    if low in UNIT_SYMBOLS:
+        return low, UNIT_SYMBOLS[low]
+    if low in UNIT_WORDS:
+        return low, UNIT_WORDS[low]
+
+    # Everything below is a word rather than a symbol, so it must look like an
+    # ordinary English noun and must not be a word that merely follows numbers.
+    if not raw.isalpha() or len(low) < 4:
+        return None
+    if low in NON_UNIT_FOLLOWERS or low in STOPWORDS or low in MULTIPLIERS:
+        return None
+    if low in MONTHS or low in CURRENCY_SYMBOLS or low in LEGAL_SUFFIXES:
+        return None
+    # An adverb or a participle describes the measuring, it is not the thing
+    # measured, and a capitalised word mid-phrase is a name rather than a noun.
+    if low.endswith("ly") or low.endswith("ing") or low.endswith("ed"):
+        return None
+    if not raw.islower():
+        return None
+    if low.endswith("s") and not low.endswith("ss") and not low.endswith("us"):
+        return low, "count"
+    return None
 
 
 class FactNormalizer:
@@ -395,9 +448,11 @@ class FactNormalizer:
                     return code
             elif symbol in low:
                 return code
-        for hint in sorted(COUNT_UNIT_HINTS, key=len, reverse=True):
-            if re.search(rf"\b{re.escape(hint)}\b", low):
-                return hint
+        # A measurement noun or symbol trailing the number names the unit.
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9]*", s):
+            classified = measurement_token(token)
+            if classified:
+                return classified[0]
         return None
 
     @classmethod
@@ -418,12 +473,10 @@ class FactNormalizer:
             return "unknown"
         if unit in UNIT_FAMILIES:
             return UNIT_FAMILIES[unit]
-        low = unit.lower()
-        if low in UNIT_FAMILIES:
-            return UNIT_FAMILIES[low]
-        if low in COUNT_UNIT_HINTS or cls._singularise(low) in COUNT_UNIT_HINTS:
-            return "count"
-        return "count"
+        classified = measurement_token(unit)
+        if classified:
+            return classified[1]
+        return "other"
 
     @classmethod
     def units_comparable(cls, unit_a: Optional[str], unit_b: Optional[str]) -> bool:
@@ -441,93 +494,7 @@ class FactNormalizer:
             return False
         if fam_a == "currency" and unit_a != unit_b:
             return False
-        if fam_a == "count" and unit_a and unit_b:
-            if cls._singularise(unit_a.lower()) != cls._singularise(unit_b.lower()):
-                return False
         return True
-
-    # ------------------------------------------------------------------
-    # Semantic values & reconciliation
-    # ------------------------------------------------------------------
-    @classmethod
-    def normalize_semantic_value(cls, raw: str) -> str:
-        """Canonicalize a text-based/semantic value for comparison."""
-        if not raw:
-            return ""
-        s = strip_accents_and_controls(raw).strip()
-        s = re.sub(r"\s+", " ", s).lower()
-        s = re.sub(r"[^\w\s-]", " ", s)
-        drop = STOPWORDS | {"the", "a", "an", "with", "using", "via", "by", "of", "for", "in", "on", "at", "and", "or"}
-        tokens = [cls._singularise(t) for t in s.split() if t not in drop]
-        return " ".join(tokens)
-
-    @classmethod
-    def semantic_values_match(cls, val_a: str, val_b: str) -> Tuple[bool, float]:
-        """Test whether two semantic value representations corroborate.
-        
-        Returns (is_match, overlap_ratio).
-        """
-        norm_a = cls.normalize_semantic_value(val_a)
-        norm_b = cls.normalize_semantic_value(val_b)
-        if not norm_a or not norm_b:
-            return False, 0.0
-        if norm_a == norm_b:
-            return True, 1.0
-
-        set_a = set(norm_a.split())
-        set_b = set(norm_b.split())
-        if not set_a or not set_b:
-            return False, 0.0
-
-        shared = set_a & set_b
-        smaller = min(len(set_a), len(set_b))
-        overlap = len(shared) / smaller if smaller else 0.0
-
-        # High containment / Jaccard overlap indicates the same fact expressed differently
-        if overlap >= 0.65 or set_a.issubset(set_b) or set_b.issubset(set_a):
-            return True, round(overlap, 3)
-
-        return False, round(overlap, 3)
-
-    @classmethod
-    def is_semantic_contradiction(
-        cls, val_a: str, val_b: str, predicate: str
-    ) -> Tuple[bool, str]:
-        """Check if two differing semantic values represent a direct contradiction."""
-        norm_a = cls.normalize_semantic_value(val_a)
-        norm_b = cls.normalize_semantic_value(val_b)
-        if not norm_a or not norm_b or norm_a == norm_b:
-            return False, ""
-
-        # Status / state antonyms
-        antonyms = [
-            ({"active", "current"}, {"resigned", "former", "inactive", "retired"}),
-            ({"approved", "passed"}, {"rejected", "denied", "failed"}),
-            ({"true", "yes", "enabled"}, {"false", "no", "disabled"}),
-            ({"public"}, {"private"}),
-            ({"increase", "growth"}, {"decrease", "decline", "fall"}),
-            ({"autonomous", "automated"}, {"human", "manual", "review", "approval"}),
-            ({"mandatory", "required"}, {"optional", "none", "without", "no"}),
-        ]
-        tokens_a = set(norm_a.split())
-        tokens_b = set(norm_b.split())
-        for group1, group2 in antonyms:
-            if (tokens_a & group1 and tokens_b & group2) or (tokens_a & group2 and tokens_b & group1):
-                return True, f"Opposing states: '{val_a}' vs '{val_b}'"
-
-        # Predicates that are inherently single-valued
-        single_valued_cues = {
-            "status", "role", "designation", "degree", "institution", "university",
-            "venue", "author", "lead_author", "headquarters", "location", "director",
-            "state", "outcome", "winner", "president", "ceo", "mode", "type", "framework"
-        }
-        pred_tokens = set(predicate.lower().split("_"))
-        if pred_tokens & single_valued_cues:
-            shared = tokens_a & tokens_b
-            if not shared or (len(shared) / max(len(tokens_a), len(tokens_b))) < 0.25:
-                return True, f"Conflicting single-valued attribute '{predicate}': '{val_a}' vs '{val_b}'"
-
-        return False, ""
 
     # ------------------------------------------------------------------
     # Time periods

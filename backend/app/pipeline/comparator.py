@@ -365,95 +365,17 @@ class FactComparator:
         factors: Dict[str, Any],
         confidence: float,
     ) -> Dict[str, Any]:
-        raw_a = (fact_a.get("value_raw") or "").strip()
-        raw_b = (fact_b.get("value_raw") or "").strip()
-        text_a = (fact_a.get("value_text") or raw_a).strip()
-        text_b = (fact_b.get("value_text") or raw_b).strip()
+        text_a = (fact_a.get("value_text") or fact_a.get("value_raw") or "").strip().lower()
+        text_b = (fact_b.get("value_text") or fact_b.get("value_raw") or "").strip().lower()
 
-        norm_a = FactNormalizer.normalize_semantic_value(text_a)
-        norm_b = FactNormalizer.normalize_semantic_value(text_b)
-        is_match, overlap = FactNormalizer.semantic_values_match(text_a, text_b)
-        factors["values_match"] = is_match
-        factors["semantic_overlap"] = overlap
-
-        # If normalized forms are identical
-        if norm_a and norm_b and norm_a == norm_b:
-            if factors.get("temporal_divergence"):
-                # Same claim across different periods is not corroboration
-                return None
+        if text_a and text_a == text_b:
             return cls._build(
                 CORROBORATED, fact_a, fact_b,
                 summary=f"Corroborated: {fact_a.get('predicate_label')}",
                 reasoning=(
-                    f"Both documents assert the same claim, '{raw_a}'. They agree on "
-                    f"{fact_a.get('predicate_label')} for {fact_a.get('subject')}. Two independently "
-                    f"published documents stating the same semantic claim constitutes corroboration."
-                ),
-                factors=factors,
-                confidence=confidence,
-            )
-
-        # The claims differ. Anything in the context (time period or scope) accounts for the gap:
-        if factors.get("temporal_divergence"):
-            return cls._build(
-                CONTEXTUALLY_DIFFERENT, fact_a, fact_b,
-                summary=f"Different periods: {fact_a.get('predicate_label')}",
-                reasoning=(
-                    f"{fact_a.get('subject')} {fact_a.get('predicate_label')} is stated as "
-                    f"'{raw_a}' and '{raw_b}'. However, the two claims describe different periods: "
-                    f"'{factors['fact_a_period']}' against '{factors['fact_b_period']}'. "
-                    f"The value or status changed over time, reconciling the apparent discrepancy."
-                ),
-                factors=factors,
-                confidence=confidence,
-            )
-
-        if factors.get("scope_divergence"):
-            return cls._build(
-                CONTEXTUALLY_DIFFERENT, fact_a, fact_b,
-                summary=f"Different scope: {fact_a.get('predicate_label')}",
-                reasoning=(
-                    f"{fact_a.get('subject')} {fact_a.get('predicate_label')} is stated as "
-                    f"'{raw_a}' and '{raw_b}', but they are reported on different bases: "
-                    f"'{factors['fact_a_scope']}' against '{factors['fact_b_scope']}'. "
-                    f"A differing reporting scope explains why the claims differ."
-                ),
-                factors=factors,
-                confidence=confidence,
-            )
-
-        # Same period and scope: evaluate paraphrase vs contradiction
-        if is_match:
-            wording = (
-                f"The two documents express the claim differently, as '{raw_a}' and '{raw_b}', "
-                f"but both assert the same underlying fact."
-                if raw_a.lower() != raw_b.lower()
-                else f"Both documents assert the same claim, '{raw_a}'."
-            )
-            return cls._build(
-                CORROBORATED, fact_a, fact_b,
-                summary=f"Corroborated: {fact_a.get('predicate_label')}",
-                reasoning=(
-                    f"{wording} They agree on {fact_a.get('predicate_label')} for "
-                    f"{fact_a.get('subject')}. Two independently published documents stating the "
-                    f"same semantic claim constitutes corroboration."
-                ),
-                factors=factors,
-                confidence=confidence,
-            )
-
-        # Case 2: Genuine or likely contradiction
-        pred_key = fact_a.get("predicate", "")
-        is_contra, reason_detail = FactNormalizer.is_semantic_contradiction(text_a, text_b, pred_key)
-        if is_contra:
-            return cls._build(
-                CONTRADICTED, fact_a, fact_b,
-                summary=f"Direct conflict: {fact_a.get('predicate_label')}",
-                reasoning=(
-                    f"Both documents report {fact_a.get('predicate_label')} for {fact_a.get('subject')}, "
-                    f"yet assert conflicting claims: '{raw_a}' against '{raw_b}'. "
-                    f"{reason_detail}. Neither document indicates a differing time period or scope "
-                    f"to account for the conflict."
+                    f"Neither figure could be reduced to a number, but both documents assert "
+                    f"the same value '{fact_a.get('value_raw')}' for "
+                    f"{fact_a.get('predicate_label')}."
                 ),
                 factors=factors,
                 confidence=confidence,
@@ -461,11 +383,11 @@ class FactComparator:
 
         return cls._build(
             RELATED_NOT_COMPARABLE, fact_a, fact_b,
-            summary=f"Different semantic claims: {fact_a.get('predicate_label')}",
+            summary=f"Not numerically comparable: {fact_a.get('predicate_label')}",
             reasoning=(
-                f"Documents report differing assertions for {fact_a.get('predicate_label')} "
-                f"('{raw_a}' vs '{raw_b}'), but they describe distinct aspects that cannot be "
-                f"directly resolved as a strict contradiction or agreement."
+                f"At least one of '{fact_a.get('value_raw')}' and '{fact_b.get('value_raw')}' "
+                f"could not be reduced to a number, so the two cannot be checked against each "
+                f"other."
             ),
             factors=factors,
             confidence=confidence,

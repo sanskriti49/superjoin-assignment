@@ -63,17 +63,6 @@ def process_document(db: Session, document: Document, max_pages: Optional[int] =
         page_limit = max_pages if max_pages is not None else settings.MAX_PAGES_PER_DOCUMENT
         pages = list(PDFIngestionPipeline.iter_pages(document.file_path, max_pages=page_limit))
 
-        # Clear existing facts, issues, and relationships for idempotency on re-processing
-        doc_fact_ids = [f[0] for f in db.query(Fact.id).filter(Fact.document_id == document.id).all()]
-        if doc_fact_ids:
-            db.query(FactRelationship).filter(
-                FactRelationship.fact_a_id.in_(doc_fact_ids) |
-                FactRelationship.fact_b_id.in_(doc_fact_ids)
-            ).delete(synchronize_session=False)
-        db.query(Fact).filter(Fact.document_id == document.id).delete(synchronize_session=False)
-        db.query(ExtractionIssue).filter(ExtractionIssue.document_id == document.id).delete(synchronize_session=False)
-        db.commit()
-
         profile = DocumentProfiler.profile_pages(pages[:PROFILE_PAGES], title=document.title)
         document.dominant_subject = profile.default_subject
         document.dominant_period = profile.default_period_raw

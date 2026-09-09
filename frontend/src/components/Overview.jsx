@@ -4,7 +4,7 @@ import { Loading, VERDICT_LABELS, formatNumber, percent } from './shared';
 
 const ORDER = ['CORROBORATED', 'CONTRADICTED', 'CONTEXTUALLY_DIFFERENT', 'RELATED_BUT_NOT_COMPARABLE'];
 
-export default function Overview({ stats, documents, onOpenDocument }) {
+export default function Overview({ stats, documents, onOpenDocument, onShowComparisons }) {
   const [schema, setSchema] = useState(null);
 
   useEffect(() => {
@@ -64,16 +64,11 @@ export default function Overview({ stats, documents, onOpenDocument }) {
       </div>
 
       <h3>How the readings compare</h3>
-      <p className="prose muted" style={{ marginBottom: 12 }}>
-        When documents report the same metric for the same subject, their values are reconciled below.
-        <strong> Incompatible units / Unanchored</strong> reflects pairs where the same metric was measured, but external conversion is needed (e.g. ₹ vs $) or dates were unstated.
-        Documents from separate topics (e.g. biometrics vs logistics) do not cross-compare because they discuss distinct domains.
-      </p>
       <div className="scroller">
         <table>
           <thead>
             <tr>
-              <th style={{ width: '35%' }}>Verdict</th>
+              <th style={{ width: '30%' }}>Verdict</th>
               <th style={{ width: '12%' }}>Count</th>
               <th>Share</th>
             </tr>
@@ -81,7 +76,17 @@ export default function Overview({ stats, documents, onOpenDocument }) {
           <tbody>
             {ORDER.map((kind) => (
               <tr key={kind}>
-                <td>{VERDICT_LABELS[kind]}</td>
+                <td>
+                  {onShowComparisons ? (
+                    <button
+                      className="row-button"
+                      title={`Show the ${VERDICT_LABELS[kind].toLowerCase()} comparisons`}
+                      onClick={() => onShowComparisons(kind)}
+                    >
+                      {VERDICT_LABELS[kind]}
+                    </button>
+                  ) : VERDICT_LABELS[kind]}
+                </td>
                 <td className="num">{formatNumber(counts[kind] || 0)}</td>
                 <td>
                   <span
@@ -96,20 +101,15 @@ export default function Overview({ stats, documents, onOpenDocument }) {
         </table>
       </div>
 
-      <h3>Documents & Topic Coverage</h3>
-      <p className="prose muted" style={{ marginBottom: 12 }}>
-        Documents in the same domain produce cross-document corroboration and contradiction links.
-        Documents marked as <em>Standalone topic</em> have all facts extracted and grounded, and will automatically link when a companion document in that topic is uploaded.
-      </p>
+      <h3>Documents</h3>
       <div className="scroller">
         <table>
           <thead>
             <tr>
               <th>Title</th>
-              <th>Subject / Topic</th>
+              <th>Subject</th>
               <th>Pages</th>
               <th>Facts</th>
-              <th>Cross-Links</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -125,19 +125,17 @@ export default function Overview({ stats, documents, onOpenDocument }) {
                 <td>{document.dominant_subject || 'not determined'}</td>
                 <td className="num">{document.pages_processed}</td>
                 <td className="num">{formatNumber(document.fact_count)}</td>
-                <td>
-                  {document.relationship_count > 0 ? (
-                    <span className="mono">{formatNumber(document.relationship_count)} links</span>
-                  ) : (
-                    <span className="muted" style={{ fontSize: 12 }}>Standalone topic (0 links)</span>
-                  )}
+                <td className="mono" title={document.error_message || ''}>
+                  {document.status === 'processing' ? 'reading…' : document.status}
                 </td>
-                <td className="mono">{document.status}</td>
               </tr>
             ))}
             {!documents.length && (
               <tr>
-                <td colSpan={6} className="muted">Nothing loaded yet.</td>
+                <td colSpan={5} className="muted">
+                  Nothing loaded yet. Drop a PDF into the panel on the left, or drop two
+                  that cover the same subject to see them compared.
+                </td>
               </tr>
             )}
           </tbody>

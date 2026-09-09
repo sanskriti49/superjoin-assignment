@@ -18,6 +18,7 @@ def list_facts(
     unit_family: Optional[str] = Query(None),
     min_confidence: float = Query(0.0, ge=0.0, le=1.0),
     search: Optional[str] = Query(None, description="Matches subject, metric, value or quote"),
+    sort: str = Query("confidence", description="confidence, value, metric or period"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -42,8 +43,19 @@ def list_facts(
             Fact.evidence_quote.ilike(term),
         ))
 
+    # Ordering is part of reading a long list: the largest figures and the most
+    # recent periods are what a reader scans for, and neither is reachable by
+    # filtering alone.
+    orderings = {
+        "confidence": (Fact.confidence.desc(),),
+        "value": (Fact.value_numeric.desc().nullslast(),),
+        "metric": (Fact.predicate_label.asc(),),
+        "period": (Fact.time_period_normalized.desc().nullslast(),),
+    }
+    order_by = orderings.get(sort, orderings["confidence"])
+
     total = query.count()
-    rows = (query.order_by(Fact.confidence.desc(), Fact.id.asc())
+    rows = (query.order_by(*order_by, Fact.id.asc())
             .offset(offset).limit(limit).all())
     return {"total": total, "offset": offset, "limit": limit,
             "items": [fact.to_dict() for fact in rows]}

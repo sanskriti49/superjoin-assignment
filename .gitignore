@@ -48,3 +48,6 @@ backend/uploads/*
 *.swp
 *.swo
 .DS_Store
+
+# Local virtualenv
+.venv/

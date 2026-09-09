@@ -4,7 +4,7 @@ export const VERDICT_LABELS = {
   CORROBORATED: 'Corroborated',
   CONTRADICTED: 'Contradicted',
   CONTEXTUALLY_DIFFERENT: 'Explained by context',
-  RELATED_BUT_NOT_COMPARABLE: 'Incompatible units / Unanchored',
+  RELATED_BUT_NOT_COMPARABLE: 'Not comparable',
 };
 
 export function Verdict({ kind }) {
@@ -15,22 +15,8 @@ export function Verdict({ kind }) {
   );
 }
 
-export function useAnimatedDots(interval = 400, maxDots = 3) {
-  const [dots, setDots] = React.useState(0);
-
-  React.useEffect(() => {
-    const timer = setInterval(() => {
-      setDots((prev) => (prev + 1) % (maxDots + 1));
-    }, interval);
-    return () => clearInterval(timer);
-  }, [interval, maxDots]);
-
-  return '.'.repeat(dots);
-}
-
 export function Loading({ what = 'data' }) {
-  const dotString = useAnimatedDots();
-  return <p className="loading">Loading {what}{dotString}</p>;
+  return <p className="loading">Loading {what}.</p>;
 }
 
 export function Empty({ children }) {
@@ -70,3 +56,63 @@ export const percent = (value) => `${Math.round((value || 0) * 100)}%`;
 
 export const formatNumber = (value) =>
   value === null || value === undefined ? '' : value.toLocaleString('en-US');
+
+/**
+ * A modal that behaves like one.
+ *
+ * Escape closes it, focus moves inside it when it opens and returns to
+ * whatever opened it when it closes, and the page behind it stops scrolling.
+ * Without those, a reader who opened a fact with the keyboard has no way back
+ * out, and the page underneath quietly scrolls away beneath the overlay.
+ */
+export function Dialog({ title, onClose, children }) {
+  const panel = React.useRef(null);
+
+  React.useEffect(() => {
+    const opener = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    panel.current?.focus();
+
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previousOverflow;
+      if (opener instanceof HTMLElement) opener.focus();
+    };
+  }, [onClose]);
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        ref={panel}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** The header every dialog shares: a title and the way out. */
+export function DialogHead({ children, onClose }) {
+  return (
+    <header>
+      <h3>{children}</h3>
+      <button className="action quiet" onClick={onClose} aria-label="Close (Escape)">
+        Close
+      </button>
+    </header>
+  );
+}

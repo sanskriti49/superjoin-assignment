@@ -1,29 +1,37 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { deleteDocument, getDocument, getPage } from '../api';
-import { Empty, Loading, Quote, formatNumber, percent } from './shared';
+import { Dialog, DialogHead, Empty, Loading, Quote, formatNumber, percent } from './shared';
+
+// Long documents list hundreds of pages of facts. Showing a readable slice and
+// letting the reader ask for the rest beats both a wall of tables and a silent
+// cut at forty pages.
+const PAGES_SHOWN = 12;
 
 export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify }) {
   const [detail, setDetail] = useState(null);
   const [page, setPage] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [showAllPages, setShowAllPages] = useState(false);
+
+  const load = useCallback(
+    () => getDocument(documentId).then(setDetail).catch(() => setFailed(true)),
+    [documentId],
+  );
 
   useEffect(() => {
     setDetail(null);
-    getDocument(documentId).then(setDetail).catch(() => setDetail(null));
-  }, [documentId]);
+    setFailed(false);
+    load();
+  }, [load]);
 
+  // A document opened straight after upload is often still being read. Polling
+  // means the page fills in by itself instead of showing an empty document that
+  // is not actually empty.
   useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        if (page) {
-          setPage(null);
-        } else if (onBack) {
-          onBack();
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [page, onBack]);
+    if (detail?.document?.status !== 'processing') return undefined;
+    const timer = setInterval(load, 2000);
+    return () => clearInterval(timer);
+  }, [detail?.document?.status, load]);
 
   const remove = async () => {
     if (!window.confirm('Remove this document and everything read from it?')) return;
@@ -44,6 +52,17 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
     }
   };
 
+  if (failed) {
+    return (
+      <Empty>
+        This document could not be loaded. It may have been removed.{' '}
+        <button className="row-button label" style={{ width: 'auto', display: 'inline' }}
+                onClick={onBack}>
+          Back to overview
+        </button>
+      </Empty>
+    );
+  }
   if (!detail) return <Loading what="the document" />;
 
   const { document: meta, facts, issues } = detail;
@@ -51,6 +70,7 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
     (groups[fact.evidence.page] ||= []).push(fact);
     return groups;
   }, {});
+  const pageNumbers = Object.keys(byPage).map(Number).sort((a, b) => a - b);
 
   return (
     <div>
@@ -82,6 +102,18 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
         </div>
       </div>
 
+      {meta.status === 'processing' && (
+        <p className="note" role="status">
+          Still reading this document. The figures above fill in as it goes.
+        </p>
+      )}
+
+      {meta.status === 'failed' && (
+        <p className="note" role="alert">
+          This document could not be read: {meta.error_message || 'no reason was recorded'}.
+        </p>
+      )}
+
       <p className="note">
         Read as being about <strong>{meta.dominant_subject || 'no clear subject'}</strong>
         {meta.dominant_period ? <>, reporting on <strong>{meta.dominant_period}</strong></> : null}.
@@ -91,12 +123,13 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
 
       <h3>Facts by page</h3>
       {!facts.length ? (
-        <Empty>Nothing measurable was found in this document.</Empty>
+        <Empty>
+          Nothing measurable was found in this document. The numbers it does contain are
+          listed below with the reason each was set aside.
+        </Empty>
       ) : (
-        Object.keys(byPage)
-          .map(Number)
-          .sort((a, b) => a - b)
-          .slice(0, 40)
+        pageNumbers
+          .slice(0, showAllPages ? pageNumbers.length : PAGES_SHOWN)
           .map((pageNumber) => (
             <div className="panel" key={pageNumber}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
@@ -128,9 +161,22 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
           ))
       )}
 
+      {pageNumbers.length > PAGES_SHOWN && !showAllPages && (
+        <div className="action-row" style={{ marginTop: 16 }}>
+          <button className="action quiet" onClick={() => setShowAllPages(true)}>
+            {`Show the remaining ${pageNumbers.length - PAGES_SHOWN} pages`}
+          </button>
+        </div>
+      )}
+
       {issues.length > 0 && (
         <>
           <h3>What was found and not kept</h3>
+          <p className="prose muted" style={{ marginTop: 0, fontSize: 14.5 }}>
+            Every number the extractor saw and decided against, with its reason. Routine
+            filtering -- page numbers, list markers, bare years -- is counted above rather
+            than listed here.
+          </p>
           <div className="scroller">
             <table>
               <thead>
@@ -145,7 +191,9 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
                   <tr key={issue.id}>
                     <td className="num">{issue.candidate_text}</td>
                     <td className="num">{issue.page_number}</td>
-                    <td className="mono muted">{issue.reason_code}</td>
+                    <td className="mono muted" title={issue.detail || ''}>
+                      {issue.reason_code.replace(/_/g, ' ')}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -155,18 +203,15 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
       )}
 
       {page && (
-        <div className="overlay" onClick={() => setPage(null)}>
-          <div className="dialog" onClick={(event) => event.stopPropagation()}>
-            <header>
-              <h3>Page {page.page_number} as stored</h3>
-              <button className="action quiet" onClick={() => setPage(null)}>Close</button>
-            </header>
-            <p className="prose muted">
-              This is the exact text every evidence quote from this page is cut from.
-            </p>
-            <Quote text={page.text} />
-          </div>
-        </div>
+        <Dialog title={`Page ${page.page_number} as stored`} onClose={() => setPage(null)}>
+          <DialogHead onClose={() => setPage(null)}>
+            {`Page ${page.page_number} as stored`}
+          </DialogHead>
+          <p className="prose muted">
+            This is the exact text every evidence quote from this page is cut from.
+          </p>
+          <Quote text={page.text} />
+        </Dialog>
       )}
     </div>
   );

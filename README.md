@@ -45,10 +45,19 @@ cd backend
 python -m pytest tests -v
 ```
 
-72 tests. They run against a temporary database with the starter loader switched off,
+85 tests. They run against a temporary database with the starter loader switched off,
 so they never touch the development data. The extraction tests use PDFs generated at
 test time about invented companies, so nothing in the extractor can have been tuned to
 the material it is checked against.
+
+`tests/test_unseen_domains.py` goes further and runs the whole pipeline over invented
+documents from healthcare, energy, public transit and higher education -- domains the
+starter set never touches -- asserting what should hold for any document at all: a
+counted noun becomes a fact, a multi-word name becomes the subject, a quote is a whole
+sentence, a period is not taken from the figure being compared against, and two
+documents about one subject can both contradict and corroborate each other. A rule that
+works only because it was written while looking at these six PDFs passes the rest of
+the suite and fails here.
 
 ### Configuration
 
@@ -64,7 +73,7 @@ There are no credentials in the repository and none are needed to run it.
 
 Suggested walkthrough:
 
-1. Overview: six documents, 511 pages, about 2,700 facts, roughly 760 cross-document
+1. Overview: six documents, 511 pages, about 2,800 facts, roughly 680 cross-document
    links, and the metric vocabulary the documents introduced by themselves.
 2. Upload a PDF and watch facts appear with their page numbers and quotes.
 3. The four cases tab, which is a live query rather than a written-up example.
@@ -93,7 +102,9 @@ PDF ─► ingestion ─► extraction ─► storage ─► comparison ─► A
 text and stores it. PDF text layers break lines at typeset width, which cuts sentences
 in half. Lines are rejoined by measuring the page's own column width: a line running
 close to full width that does not end a sentence was wrapped, so the next line
-continues it. A short line was broken on purpose and stands alone. One rule handles
+continues it. A short line was broken on purpose and stands alone. A line set in title
+case with no terminal punctuation is a heading and never continues into the sentence
+below it, which keeps a document's own title out of its first claim. One rule handles
 both a two-column annual report and a slide of KPI tiles, because the width is measured
 per page rather than assumed.
 
@@ -103,12 +114,21 @@ without any of those is not a measurement, which is how page numbers, list marke
 section references are filtered out. Around 30,000 such numbers are discarded across
 the starter set.
 
+A measurement noun is recognised by shape rather than from a list. A unit is a physical
+symbol (`MW`, `kWh`, `kg`), a spelled-out unit (`tonnes`, `days`), or any plural common
+noun, because English marks a counted thing by making it plural. That is what lets a
+document introduce "412,600 outpatient visits" or "84.2 million boardings" without a
+line of code being added for healthcare or public transit. A modifier may stand between
+the number and its noun; a preposition may not, so "page 17 for details" counts
+nothing.
+
 For each surviving quantity it reads the surrounding text four ways, in order of how
 reliable each is:
 
 | Layout | Example | Where the metric name is |
 | --- | --- | --- |
 | `prose` | "headline inflation moderated to 4.6 per cent" | before the reporting verb |
+| `prose` | "the Auditor confirms ridership of 84.2 million" | after a verb of saying |
 | `trailing` | "740 Mn express parcel shipments" | after the number |
 | `next_line` | "₹8,142 Cr" then "FY24 revenue from services" | the caption below |
 | `prev_line` | a table row under its header | the caption above |
@@ -119,15 +139,37 @@ introduces shipping metrics, and one about caviar introduces caviar metrics, wit
 change to the system. `/api/facts/schema` shows the vocabulary the loaded documents
 have produced.
 
+A metric name is read from one clause. It may not reach back across an earlier figure
+on the line, so "11.4 per cent in 2024, below the national benchmark of 13.1 per cent"
+yields two metrics rather than one repeated; and it may not contain the subject's own
+name, so "readmission rate for Northfield Regional Health System" and "readmission
+rate" are one metric rather than two.
+
 The subject, period and reporting basis come from the sentence when it states them, and
 from the document as a whole when it does not. A fact that inherited either is flagged,
 and the flag travels with it into every comparison and onto the screen.
+
+**Whose figures are these?** Two documents can only be compared if they agree on what
+they are about, so the document's subject is worth getting right. It is ranked from
+what the document itself gives away, never from a list of known companies or countries:
+the masthead at the top of the first page, mentions that keep company with figures
+rather than sitting in headings, mentions repeated across pages, a legal suffix, a
+title of the form "Review of X", and genre words trimmed off either end. The spellings
+of one name are folded together on the same key the comparison stage uses, so
+"DELHIVERY", "Delhivery Limited" and "Delhivery" count as one company. A regulator's
+audit of a hospital comes out filed under the hospital, which is what makes its figures
+comparable with the hospital's own.
+
+The evidence quote is exactly the sentence the value sits in. The period and the
+reporting basis are read back out of that quote, so a quote cropped at the previous
+number would take both from the wrong sentence, and a period on the far side of "from"
+or "compared with" belongs to the figure being compared against, not to this one.
 
 **Grounding** is a hard rule rather than a score. A fact is stored only if its quote is
 a literal substring of the stored page text at the recorded character offsets; anything
 else is discarded. `/api/facts/{id}` re-checks it on read rather than trusting a flag
 written at extraction time, and the page text is served so the check can be done by
-hand. Across the starter set, 2,732 of 2,732 facts pass.
+hand. Across the starter set, all 2,843 stored facts pass.
 
 **Normalization** (`backend/app/pipeline/normalizer.py`) puts values on a common
 footing. Indian and western magnitudes meet, so `₹8,142 Cr` and `₹81,415 Mn` are the
@@ -299,7 +341,7 @@ backend/app/
   services/     writing to the knowledge layer, first load, the four cases
   models/       documents, page text, facts, relationships, rejections
   routers/      the HTTP surface
-  tests/        72 tests, isolated database, synthetic PDFs
+  tests/        85 tests, isolated database, synthetic PDFs
 frontend/src/   React interface, hand-written CSS
 starter-datasets/  the six PDFs read on first launch
 ```
