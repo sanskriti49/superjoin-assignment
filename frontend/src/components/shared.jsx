@@ -16,7 +16,20 @@ export function Verdict({ kind }) {
 }
 
 export function Loading({ what = 'data' }) {
-  return <p className="loading">Loading {what}.</p>;
+  const [dotCount, setDotCount] = React.useState(0);
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setDotCount((prev) => (prev + 1) % 4);
+    }, 400);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <p className="loading">
+      Loading {what}{'.'.repeat(dotCount)}
+    </p>
+  );
 }
 
 export function Empty({ children }) {
