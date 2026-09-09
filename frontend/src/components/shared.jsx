@@ -50,6 +50,94 @@ export function Quote({ text, value }) {
   );
 }
 
+/**
+ * Renders page text intelligently: detects when lines look like table rows
+ * (multiple numbers/tokens) and renders them in an aligned grid/table, while
+ * preserving titles and prose lines cleanly.
+ */
+export function PageContentView({ text }) {
+  if (!text) return null;
+
+  const lines = text.split('\n').map((ln) => ln.trim()).filter(Boolean);
+
+  // Group consecutive lines that look like table data (contain 3 or more numbers/tokens)
+  const blocks = [];
+  let currentTable = null;
+
+  lines.forEach((line) => {
+    // Check if line looks like structured data (header or row with multiple numeric/quarterly cells)
+    const tokens = line.split(/\s{2,}|\t/).map((t) => t.trim()).filter(Boolean);
+    const hasMultipleNumbers = (line.match(/[-−(]?\d+(?:\.\d+)?%?\)?/g) || []).length >= 3;
+    const isQuarterlyHeader = /Q[1-4]|FY\d{2,4}|YoY|QoQ/i.test(line) && line.split(/\s+/).length >= 4;
+
+    if (hasMultipleNumbers || isQuarterlyHeader || (tokens.length >= 3)) {
+      const rowCells = tokens.length >= 3 ? tokens : line.split(/\s+/);
+      if (!currentTable) {
+        currentTable = [];
+        blocks.push({ type: 'table', rows: currentTable });
+      }
+      currentTable.push(rowCells);
+    } else {
+      currentTable = null;
+      blocks.push({ type: 'line', text: line });
+    }
+  });
+
+  return (
+    <div className="page-content-view" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {blocks.map((block, idx) => {
+        if (block.type === 'line') {
+          return (
+            <div
+              key={idx}
+              style={{
+                fontSize: 14.5,
+                fontWeight: block.text.length < 50 && !/[.!?]$/.test(block.text) ? 600 : 400,
+                color: 'var(--ink)',
+                fontFamily: 'var(--serif)',
+              }}
+            >
+              {block.text}
+            </div>
+          );
+        }
+
+        // Table block
+        const maxCols = Math.max(...block.rows.map((r) => r.length));
+        return (
+          <div key={idx} className="scroller" style={{ border: '1px solid var(--rule)', background: 'var(--paper-raised)', padding: 10 }}>
+            <table style={{ minWidth: maxCols > 6 ? 720 : '100%' }}>
+              <tbody>
+                {block.rows.map((row, rIdx) => {
+                  const isHeader = rIdx === 0 && row.some((c) => /FY|Q\d|QoQ|YoY|Date|Year|Month/i.test(c));
+                  return (
+                    <tr key={rIdx} style={{ background: isHeader ? 'var(--paper-sunk)' : 'transparent' }}>
+                      {row.map((cell, cIdx) => (
+                        <td
+                          key={cIdx}
+                          className={/\d/.test(cell) ? 'num' : ''}
+                          style={{
+                            padding: '6px 10px',
+                            fontWeight: isHeader || cIdx === 0 ? 600 : 400,
+                            fontSize: 13,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {cell}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Attributes({ rows }) {
   const shown = rows.filter(([, value]) => value !== null && value !== undefined && value !== '');
   if (!shown.length) return null;
@@ -78,7 +166,7 @@ export const formatNumber = (value) =>
  * Without those, a reader who opened a fact with the keyboard has no way back
  * out, and the page underneath quietly scrolls away beneath the overlay.
  */
-export function Dialog({ title, onClose, children }) {
+export function Dialog({ title, onClose, style, children }) {
   const panel = React.useRef(null);
 
   React.useEffect(() => {
@@ -110,6 +198,7 @@ export function Dialog({ title, onClose, children }) {
         aria-label={title}
         tabIndex={-1}
         ref={panel}
+        style={style}
         onClick={(event) => event.stopPropagation()}
       >
         {children}

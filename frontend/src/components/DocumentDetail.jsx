@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { deleteDocument, getDocument, getPage } from '../api';
-import { Dialog, DialogHead, Empty, Loading, Quote, formatNumber, percent } from './shared';
+import { Dialog, DialogHead, Empty, Loading, PageContentView, Quote, formatNumber, percent } from './shared';
 
 // Long documents list hundreds of pages of facts. Showing a readable slice and
 // letting the reader ask for the rest beats both a wall of tables and a silent
@@ -203,18 +203,53 @@ export default function DocumentDetail({ documentId, onBack, onDeleted, onNotify
       )}
 
       {page && (
-        <Dialog title={`Page ${page.page_number} as stored`} onClose={() => setPage(null)}>
-          <DialogHead onClose={() => setPage(null)}>
-            {`Page ${page.page_number} as stored`}
-          </DialogHead>
-          <p className="prose muted">
-            This is the canonical page text every evidence quote from this page is cut from.
-          </p>
-          <div style={{ maxHeight: '60vh', overflowY: 'auto', border: '1px solid var(--rule)', padding: '12px 16px', background: 'var(--paper-raised)', marginTop: 12 }}>
-            <Quote text={page.text} />
-          </div>
-        </Dialog>
+        <PageModal page={page} onClose={() => setPage(null)} />
       )}
     </div>
+  );
+}
+
+function PageModal({ page, onClose }) {
+  const [viewMode, setViewMode] = useState('table'); // 'table' or 'raw'
+
+  return (
+    <Dialog
+      title={`Page ${page.page_number} as stored`}
+      onClose={onClose}
+      style={{ maxWidth: 900, width: '95vw' }}
+    >
+      <DialogHead onClose={onClose}>
+        {`Page ${page.page_number} as stored`}
+      </DialogHead>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <p className="prose muted" style={{ margin: 0 }}>
+          This is the canonical page text every evidence quote from this page is cut from.
+        </p>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            className={`action quiet ${viewMode === 'table' ? 'active' : ''}`}
+            style={{ fontWeight: viewMode === 'table' ? 600 : 400, borderBottom: viewMode === 'table' ? '2px solid var(--ink)' : 'none' }}
+            onClick={() => setViewMode('table')}
+          >
+            Formatted Table
+          </button>
+          <button
+            className={`action quiet ${viewMode === 'raw' ? 'active' : ''}`}
+            style={{ fontWeight: viewMode === 'raw' ? 600 : 400, borderBottom: viewMode === 'raw' ? '2px solid var(--ink)' : 'none' }}
+            onClick={() => setViewMode('raw')}
+          >
+            Raw Text
+          </button>
+        </div>
+      </div>
+
+      <div style={{ maxHeight: '65vh', overflowY: 'auto', border: '1px solid var(--rule)', padding: '14px 18px', background: 'var(--paper-raised)' }}>
+        {viewMode === 'table' ? (
+          <PageContentView text={page.text} />
+        ) : (
+          <Quote text={page.text} />
+        )}
+      </div>
+    </Dialog>
   );
 }
